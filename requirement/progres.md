@@ -49,7 +49,7 @@ Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sud
 - Sahkan kebijakan refund, ongkir/biaya, retensi, izin, peran pemrosesan data, SOP resep, kategori produk, dan prosedur pilot.
 - Tentukan apotek/wilayah pilot dan buktikan pemisahan stok daring dari stok kasir atau siapkan integrasi POS.
 - Siapkan backup dan pemulihan, monitoring/alert, pelatihan operasional, serta runbook insiden.
-- Jalankan UAT 38 skenario di IPD, uji keamanan/unggahan, uji beban, dan verifikasi pemulihan. Suite integration PostgreSQL mencakup subset alur API; hasil CI pertamanya masih menunggu dan suite ini bukan pengganti UAT.
+- Jalankan UAT 38 skenario di IPD, uji keamanan/unggahan, uji beban, dan verifikasi pemulihan. Suite integration PostgreSQL mencakup subset alur API dan bukan pengganti UAT.
 
 ## Keputusan terbuka pada `09-Review-Report.md`
 
@@ -62,4 +62,4 @@ Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sud
 - Bundel API dan web berhasil dibuat dengan Bun setelah perbaikan review.
 - Pemeriksaan bundel tidak menjalankan migrasi pada PostgreSQL dan bukan bukti lulus UAT.
 
-- Suite integration PostgreSQL telah ditambahkan ke GitHub Actions; status hasil run untuk perubahan ini belum tersedia.
+- GitHub Actions run #17 lulus: API unit/architecture 68/68, web 38/38, PostgreSQL integration 5/5; migrasi 001–002 diterapkan dan build API/web berhasil. [Log run](https://github.com/aryanattapt/farmago/actions/runs/41378630523).
