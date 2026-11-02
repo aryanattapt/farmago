@@ -9,7 +9,8 @@
     "seed": "bun --env-file ../../.env src/interfaces/cli/seed.ts",
     "provision:user": "bun --env-file ../../.env src/interfaces/cli/provision-user.ts",
     "test": "bun test src",
-    "build": "bun build src/server.ts --target=bun --outdir=dist"
+    "build": "bun build src/server.ts --target=bun --outdir=dist",
+    "test:integration": "bun test test/integration"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.4",

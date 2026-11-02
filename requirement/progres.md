@@ -1,6 +1,6 @@
 # Progres Implementasi FarmaGO
 
-**Pembaruan:** 29 Oktober 2026  
+**Pembaruan:** 2 November 2026  
 **Status umum:** Implementasi awal tersedia; belum siap untuk pilot atau produksi.
 
 Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sudah melewati UAT atau validasi operasional.
@@ -16,6 +16,7 @@ Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sud
 - Panel admin/operasional untuk katalog, stok dan harga, onboarding/status apotek, pesanan, permintaan pembatalan, dan kasus bantuan.
 - Sesi cookie HttpOnly, proteksi CSRF, otorisasi berbasis peran dan penugasan apotek, MFA TOTP untuk akun internal, audit, serta pembatasan jenis dan ukuran unggahan resep.
 - Batas ukuran seluruh body request API mengikuti batas unggahan resep dan diterapkan sebelum parsing.
+- Suite integration API berbasis PostgreSQL ditambahkan untuk reservasi/idempotensi stok, race pada stok terakhir, perubahan harga quote, otorisasi dan konkurensi review resep, serta pemenuhan pickup; CI menyiapkan database khusus dan menjalankan migrasi.
 - Bucket rate limit yang kedaluwarsa dibersihkan berkala agar memori API tidak terus tumbuh.
 - Temuan review awal diperbaiki: klasifikasi dan aktivasi katalog dibatasi ke apoteker; order mengunci status apotek saat dibuat; referensi bukti pickup tersimpan lewat migrasi; file resep dibersihkan jika transaksi gagal.
 - Registrasi, verifikasi kontak, reset kata sandi, dan mutasi operasional/audit berjalan dalam transaksi; login membatasi kata sandi maksimum 128 karakter.
@@ -48,7 +49,7 @@ Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sud
 - Sahkan kebijakan refund, ongkir/biaya, retensi, izin, peran pemrosesan data, SOP resep, kategori produk, dan prosedur pilot.
 - Tentukan apotek/wilayah pilot dan buktikan pemisahan stok daring dari stok kasir atau siapkan integrasi POS.
 - Siapkan backup dan pemulihan, monitoring/alert, pelatihan operasional, serta runbook insiden.
-- Jalankan migrasi pada database, UAT 38 skenario di IPD, uji keamanan/unggahan, uji beban, dan verifikasi pemulihan. Belum ada hasil pengujian tersebut.
+- Jalankan UAT 38 skenario di IPD, uji keamanan/unggahan, uji beban, dan verifikasi pemulihan. Suite integration PostgreSQL mencakup subset alur API; hasil CI pertamanya masih menunggu dan suite ini bukan pengganti UAT.
 
 ## Keputusan terbuka pada `09-Review-Report.md`
 
@@ -60,3 +61,5 @@ Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sud
 
 - Bundel API dan web berhasil dibuat dengan Bun setelah perbaikan review.
 - Pemeriksaan bundel tidak menjalankan migrasi pada PostgreSQL dan bukan bukti lulus UAT.
+
+- Suite integration PostgreSQL telah ditambahkan ke GitHub Actions; status hasil run untuk perubahan ini belum tersedia.
