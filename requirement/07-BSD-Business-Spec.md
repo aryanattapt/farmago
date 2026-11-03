@@ -20,7 +20,7 @@ Platform menghubungkan pelanggan dengan apotek mitra aktif. Apotek menyiapkan da
 | BR-07 | Stok direservasi selama 30 menit sebelum pembayaran sebagai asumsi awal; waktu dapat dikonfigurasi. Setelah kedaluwarsa, pelanggan membuat pesanan baru. Untuk pesanan yang sudah terbayar, stok tetap dicadangkan sampai dipenuhi atau dibatalkan secara sah. | Operasional/product |
 | BR-08 | Pesanan diproses setelah pembayaran terkonfirmasi dan persyaratan resep terpenuhi. | Operasional/farmasi |
 | BR-09 | Jika stok tidak sesuai setelah pembayaran, penyiapan dihentikan dan CS menawarkan penyelesaian, termasuk refund sesuai keputusan dan kebijakan. | Apotek/CS |
-| BR-10 | Pembatalan biasa hanya sebelum serah terima. Setelah kurir/pelanggan menerima paket, gunakan kasus bantuan/refund; status fisik pesanan tidak dikembalikan ke batal. Booking kurir aktif/tidak pasti harus diselesaikan sebelum pembatalan pesanan. | CS/finance/legal |
+| BR-10 | Pembatalan biasa hanya sebelum serah terima. Setelah kurir/pelanggan menerima barang, status pesanan tetap `completed`; pengajuan refund pascapenerimaan dicatat terpisah dan tidak mengembalikan stok otomatis. Booking kurir aktif/tidak pasti harus diselesaikan sebelum pembatalan pesanan. | CS/apotek |
 | BR-11 | Kurir hanya menerima data minimum untuk pengiriman; resep tidak dibagikan kepada kurir. | Privasi/operasional |
 | BR-12 | Keputusan resep, koreksi stok, pembatalan, dan refund memiliki pelaku, waktu, dan jejak audit. | Operasional |
 | BR-13 | Pesanan yang memerlukan resep hanya dapat dibuat saat layanan pemeriksaan resep apotek buka. Jam layanan dan masa reservasi ditampilkan sebelum konfirmasi; waktu respons tidak dijanjikan tanpa kapasitas yang terbukti. | Farmasi/operasional |
@@ -28,6 +28,7 @@ Platform menghubungkan pelanggan dengan apotek mitra aktif. Apotek menyiapkan da
 | BR-15 | Satu SKU mempunyai satu satuan jual utuh. Sebelum `ready`, produk, jumlah, kondisi, lot bila relevan dan kedaluwarsa diperiksa. Pesanan resep memerlukan pemeriksaan akhir apoteker. | Farmasi/apotek |
 | BR-16 | Resep harus ditelaah untuk pasien dan jumlah yang sesuai; unggahan tidak otomatis sah untuk penggunaan berulang. Repeat refill, racikan, pemenuhan sebagian dan pecahan satuan tidak termasuk MVP. | Farmasi/product |
 | BR-17 | Registrasi publik hanya memberi peran pelanggan. Admin/CS tidak otomatis memiliki akses berkas resep atau kewenangan keputusan klinis. | Product/keamanan |
+| BR-18 | Form refund pascapenerimaan harus diajukan paling lambat 3 hari sejak barang diterima dan memuat alasan, bank, nama pemilik rekening, serta nomor rekening. Pesanan kurir wajib menyertakan video unboxing. Apotek memutuskan pengajuan dan melakukan transfer manual maksimal 7 hari setelah persetujuan. Refund dicatat terpisah, nominal kumulatif tidak melebihi dana diterima, dan akses rekening/video dibatasi ke pelanggan serta apotek yang ditugaskan. | Apotek/product/finance |
 
 ## 3. Perhitungan
 
@@ -36,7 +37,7 @@ subtotal = jumlah seluruh (harga satuan × kuantitas)
 total = subtotal - diskon + ongkos kirim + biaya layanan
 ```
 
-Semua nilai ditetapkan server dan ditampilkan dalam rupiah. Fitur promo belum termasuk MVP sehingga diskon nol; biaya layanan default nol sampai kebijakannya disetujui. Nilai refund yang diminta, diproses, dan berhasil secara kumulatif tidak boleh melebihi dana yang benar-benar diterima, termasuk pembayaran yang masuk rekonsiliasi. Refund yang hasilnya belum pasti tetap menahan kuota. Komisi, biaya layanan final, cakupan refund ongkir, dan lama refund belum diputuskan; jangan menampilkan angka atau janji yang belum disetujui.
+Semua nilai ditetapkan server dan ditampilkan dalam rupiah. Fitur promo belum termasuk MVP sehingga diskon nol; biaya layanan default nol sampai kebijakannya disetujui. Nilai refund yang diminta, diproses, dan berhasil secara kumulatif tidak boleh melebihi dana yang benar-benar diterima, termasuk pembayaran yang masuk rekonsiliasi. Refund yang hasilnya belum pasti tetap menahan kuota. Komisi, biaya layanan final, dan cakupan refund ongkir belum diputuskan. Kebijakan awal menetapkan jendela pengajuan 3 hari sejak penerimaan dan transfer manual maksimal 7 hari setelah persetujuan; kelayakan produk, dasar nominal refund, serta persetujuan legal/farmasi tetap harus disahkan sebelum pilot.
 
 ## 4. SOP pengecualian
 
@@ -51,7 +52,7 @@ Semua nilai ditetapkan server dan ditampilkan dalam rupiah. Fitur promo belum te
 | Stok fisik tidak cocok | Hentikan penyiapan dan penjualan produk terkait; eskalasi ke CS, selesaikan dampak pada reservasi, lalu koreksi stok secara berwenang. |
 | Pembatalan setelah stok dikeluarkan | Apotek memeriksa kondisi dan kelayakan produk; stok hanya dikembalikan melalui proses resmi bila SOP mengizinkan. |
 | Kurir gagal | Catat kendala, koordinasikan opsi pengiriman berikutnya, dan beritahu pelanggan. |
-| Keluhan produk | Catat bukti minimal dan eskalasi ke apotek; jangan menjanjikan pengembalian otomatis. |
+| Keluhan produk / pengajuan refund setelah diterima | Pelanggan mengisi alasan, bank, nama pemilik rekening, dan nomor rekening dalam 3 hari sejak penerimaan. Pesanan kurir memerlukan video unboxing. Apotek menyetujui atau menolak dengan alasan; bila disetujui, transfer manual maksimal 7 hari sejak persetujuan dan dicatat dengan referensi. Status order tetap `completed`; stok tidak bertambah otomatis. |
 | Status pembayaran/kurir datang tidak berurutan | Jangan mundurkan status dana atau pemenuhan yang sudah terverifikasi. Cocokkan referensi, tahap fisik dan bukti ke penyedia, lalu catat kasus jika konflik. |
 | Refund time-out | Pertahankan status diproses dan kuota tertahan; cek penyedia dengan referensi sama sebelum retry atau gagal definitif. |
 | Dokumen resep berubah | Sebelum tagihan: revisi baru meniadakan efektivitas persetujuan lama dan memerlukan review ulang. Sesudah tagihan: perubahan lewat endpoint biasa ditolak dan diarahkan ke apoteker melalui bantuan. |

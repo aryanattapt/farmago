@@ -244,6 +244,12 @@ export function createApiApp() {
     { method: 'PATCH', path: '/pharmacies/:pharmacyId/service-hours', handler: createAuthenticatedEndpoint(handlePharmacyRoutes) },
     { method: 'GET', path: '/shipping/destinations', handler: createAuthenticatedEndpoint(handleShippingRoutes) },
 
+    { method: 'GET', path: '/orders/:orderId/return-refund-requests', handler: createAuthenticatedEndpoint(handleSupportRoutes) },
+    { method: 'POST', path: '/orders/:orderId/return-refund-requests', handler: createAuthenticatedEndpoint(handleSupportRoutes) },
+    { method: 'GET', path: '/pharmacy/return-refund-requests', handler: createAuthenticatedEndpoint(handleSupportRoutes) },
+    { method: 'GET', path: '/return-refund-requests/:requestId/evidence', handler: createAuthenticatedEndpoint(handleSupportRoutes) },
+    { method: 'POST', path: '/return-refund-requests/:requestId/decision', handler: createAuthenticatedEndpoint(handleSupportRoutes) },
+    { method: 'POST', path: '/return-refund-requests/:requestId/manual-refund', handler: createAuthenticatedEndpoint(handleSupportRoutes) },
     { method: 'POST', path: '/orders/:orderId/cancellation-requests', handler: createAuthenticatedEndpoint(handleSupportRoutes) },
     { method: 'POST', path: '/cancellation-requests/:requestId/decision', handler: createAuthenticatedEndpoint(handleSupportRoutes) },
     { method: 'GET', path: '/orders/:orderId/support-cases', handler: createAuthenticatedEndpoint(handleSupportRoutes) },

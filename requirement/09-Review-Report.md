@@ -35,7 +35,7 @@ Ini adalah keputusan perencanaan yang belum disahkan pengguna/pemilik proyek, bu
 | D-02 | Apakah reservasi 30 menit realistis untuk pemeriksaan resep dan pembayaran; jam layanan, kapasitas serta penanganan konfirmasi terlambat. | Product owner + apoteker + operasional | Sebelum flow checkout dan parameter dikunci | Risiko pesanan valid kedaluwarsa dan dana perlu refund. |
 | D-03 | Kategori produk, satuan, pemeriksaan lot/kedaluwarsa, pasien dan penggunaan resep ulang/asli/elektronik. | Apoteker penanggung jawab + legal | Sebelum workflow farmasi dan katalog pilot disetujui | Proses resep dan penyerahan belum tervalidasi. Hash dokumen tidak cukup untuk membuktikan keaslian atau mencegah penyalahgunaan. |
 | D-04 | Penyedia pembayaran/kurir, kemampuan idempotensi, settlement tunggal, data verifikasi dan rekonsiliasi. | Backend lead + finance + operasional | Sebelum kontrak adapter penyedia dikunci | Kontrak belum dapat dinyatakan kompatibel dengan vendor nyata. |
-| D-05 | Kebijakan pembatalan/refund, ongkir, biaya layanan, pengembalian barang dan tenggat layanan. | Product owner + finance + legal | Sebelum UAT bisnis | CS belum mempunyai kebijakan final untuk setiap kondisi. |
+| D-05 | Jendela pengajuan 3 hari dan transfer refund manual maksimal 7 hari setelah persetujuan telah ditetapkan sebagai kebijakan awal; kelayakan produk/retur, nominal dan cakupan ongkir, otoritas persetujuan serta pengesahan legal/farmasi tetap perlu diputuskan. | Product owner + finance + legal + farmasi | Sebelum UAT bisnis | CS/apotek belum mempunyai SOP final untuk setiap kondisi. |
 | D-06 | Model izin, peran pengendali/prosesor data, retensi, hak subjek, insiden, integrasi wajib dan perjanjian apotek. | Legal + farmasi + penanggung jawab privasi | Sebelum pilot | Paket tidak menjadi bukti kepatuhan hukum. |
 | D-07 | Wilayah, volume, anggaran, personel, SLA, framework backend dan profil beban uji. | Product owner + technical lead | Sebelum komitmen estimasi dan sprint | Jadwal 16 minggu dan target kinerja masih estimasi. |
 
@@ -44,7 +44,7 @@ React JS dan Bun adalah pilihan pengguna. Hono, PostgreSQL, penyimpanan objek da
 ## 4. Kelengkapan dan batas pemeriksaan
 
 - Delapan dokumen inti diselaraskan menjadi versi 0.4; catatan ini merupakan dokumen review tambahan.
-- Keterlacakan kebutuhan PR-01 sampai PR-12 ditambahkan ke IPD; daftar rencana uji berjumlah 38 skenario.
+- Keterlacakan kebutuhan PR-01 sampai PR-12 ditambahkan ke IPD; daftar rencana uji berjumlah 42 skenario.
 - Pemeriksaan otomatis terbatas pada versi, keberadaan tautan lokal, pasangan fence Markdown dan sintaks contoh JSON. Pemeriksaan ini bukan validasi semantik Mermaid atau eksekusi alur aplikasi.
 - Belum ada OpenAPI lengkap, DDL/migration siap eksekusi, angka kapasitas nyata, kontrak vendor final, bukti pemulihan, pengujian keamanan atau hasil penerimaan pengguna. Itu adalah hasil kerja implementasi yang masih harus dihasilkan.
 

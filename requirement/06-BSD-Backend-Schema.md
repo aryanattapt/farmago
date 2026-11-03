@@ -47,7 +47,12 @@ Status pesanan: `awaiting_prescription`, `awaiting_payment`, `paid`, `processing
 | `POST /orders/{id}/fulfillment-checks` | Petugas/apoteker sesuai kewenangan | Catat pemeriksaan akhir dan lot/kedaluwarsa sebelum `ready`; pesanan resep wajib diperiksa apoteker. |
 | `POST /orders/{id}/shipment-bookings` | Petugas apotek ditugaskan | Mulai booking kurir idempotent; hanya untuk pengiriman dan pesanan `ready`, hasil tidak pasti tidak boleh membuat booking kedua. |
 | `POST /webhooks/shipping/{provider}` | Penyedia terverifikasi | Peta status kurir ke pemenuhan; bukti penerimaan valid dapat menyelesaikan pesanan, tanpa mempercayai input pelanggan. |
-| `POST /orders/{id}/cancellation-requests` | Pemilik/CS | Ajukan pembatalan; keputusan sesuai status dan kebijakan. |
+| `POST /orders/{id}/cancellation-requests` | Pemilik/CS | Ajukan pembatalan sebelum serah-terima; keputusan sesuai status dan kebijakan. |
+| `GET/POST /orders/{id}/return-refund-requests` | Pemilik | Lihat kelayakan/status; kirim alasan, bank, rekening, serta video MP4/WebM untuk pesanan kurir dalam 72 jam setelah diterima. |
+| `GET /pharmacy/return-refund-requests` | Apoteker/staf apotek ditugaskan | Lihat pengajuan beserta rekening dan bukti hanya untuk apotek penugasannya. |
+| `POST /return-refund-requests/{id}/decision` | Apoteker/staf apotek ditugaskan | Setujui nominal atau tolak dengan alasan; persetujuan membuat refund manual dengan tenggat 7 hari. |
+| `POST /return-refund-requests/{id}/manual-refund` | Apoteker/staf apotek ditugaskan | Catat referensi transfer; selesaikan pengajuan satu kali tanpa mengubah status pesanan. |
+| `GET /return-refund-requests/{id}/evidence` | Pemilik/apotek ditugaskan | Akses privat ke video unboxing. |
 | `POST /cancellation-requests/{id}/decision` | CS/admin berwenang | Setujui atau tolak pembatalan dengan alasan; lakukan pelepasan stok dan buat tugas refund jika berlaku. |
 | `POST /orders/{id}/support-cases`, `GET /orders/{id}/support-cases` | Pemilik/CS sesuai izin | Catat dan pantau kendala; konten resep tidak tampil ke CS tanpa hak akses. |
 | `PATCH /support-cases/{id}` | CS/finance/apoteker sesuai jenis kasus | Tetapkan petugas, catat penanganan dan tutup kasus; hold klinis hanya dilepas apoteker berwenang. |
@@ -107,7 +112,7 @@ Kejadian internal contoh `order.created`, `prescription.reviewed`, `payment.conf
 
 ## 6. Validasi dan proteksi khusus
 
-- Batasi ukuran dan tipe unggahan sesuai konfigurasi yang diuji; simpan kunci objek privat dan cek akses pada setiap permintaan.
+- Batasi ukuran dan tipe unggahan sesuai konfigurasi yang diuji; video unboxing menerima MP4/WebM hingga 25 MB. Simpan kunci objek privat dan cek akses pada setiap permintaan; jangan mengembalikan nomor rekening ke pembaca detail pesanan umum.
 - Validasi signature webhook dan cocokkan nominal, mata uang, referensi, serta status transaksi ke penyedia; respons duplikat tidak membuat efek ulang.
 - Setiap peninjauan resep harus berasal dari apoteker aktif yang ditugaskan ke apotek pesanan. Perubahan item memerlukan pesanan baru dan pemeriksaan ulang.
 - Hanya satu tagihan aktif (`creating` atau `pending`) per pesanan; refund dan pemenuhan memakai kontrol konkurensi dan hak akses eksplisit.
@@ -120,7 +125,7 @@ Kejadian internal contoh `order.created`, `prescription.reviewed`, `payment.conf
 | `handover_to_courier` | Metode delivery, status `ready`, booking terkonfirmasi, bukti serah terima tersedia, tidak ada pembatalan/hold | Status pesanan `in_delivery`, status kurir `in_transit`, petugas dan waktu serah terima tersimpan. |
 | `confirm_pickup` | Metode pickup, status `ready`, identitas/kode pengambilan terverifikasi sesuai SOP, bukti tercatat, tidak ada hold | Pesanan `completed`, pemenuhan `picked_up`; pemanggilan ulang tidak menggandakan efek. |
 | Keputusan pembatalan | Status hanya sebelum serah terima; jika booking kurir ada, pembatalan booking harus pasti terlebih dahulu | Pesanan `cancelled`; lepas reservasi jika belum dikonsumsi; pengembalian stok setelah `ready` tetap memerlukan pemeriksaan terpisah. |
-| Permintaan refund | Dana diterima terverifikasi, alasan dan kewenangan valid; `requested + processing + succeeded + permintaan baru <= received_amount` | Simpan refund `requested` dan referensi unik. Status pesanan serta stok tidak berubah hanya karena refund. |
+| Permintaan refund | Dana diterima terverifikasi; jumlah kumulatif tidak melebihi `received_amount`. Pengajuan pascapenerimaan harus masuk dalam 72 jam, ditinjau apotek, dan transfer manual selesai maksimal 7 hari sesudah persetujuan. | Simpan alasan, rekening dan video privat, keputusan, nominal, tenggat, serta referensi transfer. Status pesanan tetap `completed`; stok tidak berubah. |
 
 Penyedia pembayaran pilot harus mendukung satu settlement per tagihan, referensi unik, konfirmasi nominal/mata uang/waktu, serta idempotensi atau pencarian status. `payments.amount` adalah nilai tagihan yang diharapkan; `receivedAmount` adalah dana aktual terverifikasi. Jika berbeda nominal, mata uang tidak sesuai, ada dana tambahan, atau event bertentangan, buka kasus rekonsiliasi dan jangan tambah hak pemenuhan. Kuota refund berdasarkan dana aktual dan statusnya tidak diturunkan oleh event usang.
 

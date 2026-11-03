@@ -89,6 +89,10 @@ Pekerjaan dapat tumpang tindih setelah dependensi siap; integrasi produksi dan l
 | UAT-36 | Perubahan stok, keputusan resep, pembatalan, refund dan serah terima | Setiap tindakan dapat ditelusuri ke pelaku/waktu/referensi; log umum tidak memuat resep atau token. |
 | UAT-37 | Resep yang pernah dipenuhi atau tidak jelas riwayatnya diajukan kembali | Tidak memperoleh persetujuan otomatis; apoteker menelaah riwayat dan SOP, serta mencatat keputusan dan alasan. |
 | UAT-38 | Isi alamat diganti setelah quote dengan total ongkir yang sama | Pesanan tidak diam-diam memakai alamat baru; pelanggan harus membuat dan menyetujui quote baru. |
+| UAT-39 | Pengajuan refund setelah barang diterima | Form menerima pengajuan sampai 3 hari setelah waktu penerimaan dan menolak pengajuan setelah batas; pesanan tetap `completed`. |
+| UAT-40 | Bukti video unboxing | Pengiriman kurir wajib menyertakan video MP4/WebM valid; berkas invalid/terlalu besar ditolak dan video pickup tidak diwajibkan. |
+| UAT-41 | Rekening dan akses pengajuan refund | Bank, nama pemilik dan nomor rekening tercatat; hanya pelanggan dan apotek yang ditugaskan dapat melihat rekening/video; apotek menolak dengan alasan atau menyetujui nominal yang tidak melebihi sisa dana diterima. |
+| UAT-42 | Transfer refund manual | Pengajuan disetujui memiliki tenggat 7 hari; apotek mencatat referensi transfer, status refund menjadi ditransfer satu kali, dan status order tetap `completed`. |
 
 Tambahkan uji kerentanan, unggah berbahaya, otorisasi, validasi webhook, serta performa berdasarkan beban pilot. Data uji tidak menggunakan resep asli.
 
@@ -126,7 +130,7 @@ Tetapkan product owner, wilayah dan jumlah apotek, penyedia pembayaran/kurir, vo
 | PR-08 | Payment adapter, webhook dan rekonsiliasi | UAT-05, UAT-06, UAT-16, UAT-18, UAT-22, UAT-25, UAT-26 |
 | PR-09 | Pemeriksaan akhir, booking dan serah terima | UAT-01, UAT-08, UAT-23, UAT-31–UAT-33 |
 | PR-10 | Status pesanan dan notifikasi | UAT-01, UAT-08, UAT-33 |
-| PR-11 | Pembatalan, kasus bantuan dan refund | UAT-09, UAT-15, UAT-23, UAT-24 |
+| PR-11 | Pembatalan, kasus bantuan dan refund | UAT-09, UAT-15, UAT-23, UAT-24, UAT-39–UAT-42 |
 | PR-12 | Admin, peran, audit dan pemulihan | UAT-07, UAT-10, UAT-30, UAT-36 |
 
-Detail terbuka, keterbatasan review dan keputusan gerbang tercatat di [Catatan review](09-Review-Report.md). Daftar UAT merupakan rencana pengujian; belum ada bukti eksekusi karena aplikasi belum dibangun.
+Detail terbuka, keterbatasan review dan keputusan gerbang tercatat di [Catatan review](09-Review-Report.md). Daftar UAT merupakan rencana pengujian; belum ada bukti eksekusi UAT provider, keamanan, beban, dan operasional.

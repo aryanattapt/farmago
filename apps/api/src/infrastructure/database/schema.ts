@@ -359,6 +359,7 @@ export const shipments = pgTable('shipments', {
   createdAt: createdAt(),
   handoverReference: text('handover_reference'),
   handedOverAt: timestamp('handed_over_at', { withTimezone: true }),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
 })
 
 export const shipmentAttempts = pgTable('shipment_attempts', {
@@ -411,6 +412,30 @@ export const cancellationRequests = pgTable('cancellation_requests', {
   status: text('status').notNull().default('requested'),
   decidedBy: uuid('decided_by'),
   decisionReason: text('decision_reason'),
+  createdAt: createdAt(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+})
+
+export const returnRefundRequests = pgTable('return_refund_requests', {
+  id: id(),
+  orderId: uuid('order_id').notNull(),
+  requestedBy: uuid('requested_by').notNull(),
+  reason: text('reason').notNull(),
+  bankName: text('bank_name').notNull(),
+  accountHolderName: text('account_holder_name').notNull(),
+  accountNumber: text('account_number').notNull(),
+  videoObjectKey: text('video_object_key'),
+  videoMimeType: text('video_mime_type'),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
+  eligibleUntil: timestamp('eligible_until', { withTimezone: true }).notNull(),
+  status: text('status').notNull().default('requested'),
+  decidedBy: uuid('decided_by'),
+  decisionReason: text('decision_reason'),
+  refundId: uuid('refund_id'),
+  refundAmount: numeric('refund_amount', { precision: 14, scale: 2 }),
+  refundDueAt: timestamp('refund_due_at', { withTimezone: true }),
+  refundedAt: timestamp('refunded_at', { withTimezone: true }),
+  transferReference: text('transfer_reference'),
   createdAt: createdAt(),
   decidedAt: timestamp('decided_at', { withTimezone: true }),
 })
