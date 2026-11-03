@@ -14,7 +14,7 @@ describe('KomerceDeliveryClient', () => {
     expect(result).toEqual({ orderNo: 'KOM-7', providerOrderId: '7' })
     expect(calls[0]?.url.pathname).toBe('/order/api/v1/orders/store')
     expect((calls[0]?.init.headers as Record<string, string>)['x-api-key']).toBe('delivery-secret')
-    expect(called?.init.headers).not.toHaveProperty('key')
+    expect(calls[0]?.init.headers).not.toHaveProperty('key')
   })
 
   test('classifies a provider rejection as safe to retry after correction', async () => {

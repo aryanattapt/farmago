@@ -406,8 +406,8 @@ export async function updateAdminPharmacy(
     const { deliveryContactName, deliveryPhone, deliveryEmail } = deliveryContact
     if (
       (deliveryContactName != null && (deliveryContactName.length < 2 || deliveryContactName.length > 100)) ||
-      (deliveryPhone != null && !/^(?:\\+?62|0|8)[\\d\\s()-]{8,18}$/.test(deliveryPhone)) ||
-      (deliveryEmail != null && (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(deliveryEmail) || deliveryEmail.length > 200))
+      (deliveryPhone != null && !/^(?:\+?62|0|8)[\d\s()-]{8,18}$/.test(deliveryPhone)) ||
+      (deliveryEmail != null && (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(deliveryEmail) || deliveryEmail.length > 200))
     )
       throw new ApplicationError(400, 'INVALID_DELIVERY_CONTACT', 'Nama, telepon, dan email kontak pengirim apotek harus valid.')
   }

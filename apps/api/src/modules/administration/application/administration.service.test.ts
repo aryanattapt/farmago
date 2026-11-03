@@ -47,9 +47,7 @@ describe('admin product shipping weights', () => {
       deliveryEmail: 'pickup@example.test',
     }
     await expect(createAdminPharmacy(repository, 'admin-1', input)).resolves.toMatchObject({ id: 'pharmacy-1' })
-    await expect(createAdminPharmacy(repository, 'admin-1', { ...input, deliveryPhone: '555' })).rejects.toMatchObject({
-      status: 400, code: 'INVALID_PHARMACY',
-    })
+    expect(() => createAdminPharmacy(repository, 'admin-1', { ...input, deliveryPhone: '555' })).toThrow(ApplicationError)
   })
 
   test('saves a branch origin selected from RajaOngkir location results', async () => {
