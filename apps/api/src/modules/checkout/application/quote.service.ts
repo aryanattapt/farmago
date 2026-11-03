@@ -10,6 +10,7 @@ import type {
 import { parseCartItems } from '../domain/cart'
 import {
   calculateLowestShippingOption,
+  calculateShippingOptions,
   packageWeightGrams,
   type ShippingSnapshot,
 } from '../../shipping'
@@ -84,6 +85,7 @@ export type BuildQuoteResult =
         | 'shipping-dimensions-missing'
         | 'shipping-origin-missing'
         | 'shipping-unavailable'
+        | 'shipping-option-unavailable'
         | 'pharmacy-unavailable'
         | 'stock-changed'
     }
@@ -94,10 +96,16 @@ export type ShippingCalculator = {
     destinationId: number
     weightGrams: number
   }): Promise<ShippingSnapshot | null>
+  calculateOptions?(input: {
+    originId: number
+    destinationId: number
+    weightGrams: number
+  }): Promise<ShippingSnapshot[]>
 }
 
 const defaultShippingCalculator: ShippingCalculator = {
   calculate: calculateLowestShippingOption,
+  calculateOptions: calculateShippingOptions,
 }
 
 export async function buildCheckoutQuote(
@@ -116,6 +124,7 @@ export async function buildCheckoutQuote(
 
   let chosen: { pharmacy: PharmacyRow; stock: StockRow[] } | null = null
   let shippingSnapshot: ShippingSnapshot | null = null
+  let shippingOptions: ShippingSnapshot[] = []
   let missingShippingOrigin = false
   let noShippingRoute = false
   for (const pharmacy of await repository.listActivePharmacies()) {
@@ -166,15 +175,28 @@ export async function buildCheckoutQuote(
         })),
       )
       if (weightGrams == null) return { ok: false, reason: 'shipping-weight-missing' }
-      shippingSnapshot = await shipping.calculate({
+      const shippingInput = {
         originId: Number(pharmacy.rajaongkir_origin_id),
         destinationId: Number(address!.rajaongkir_destination_id),
         weightGrams,
-      })
-      if (!shippingSnapshot) {
+      }
+      shippingOptions = shipping.calculateOptions
+        ? await shipping.calculateOptions(shippingInput)
+        : [await shipping.calculate(shippingInput)].filter(
+            (option): option is ShippingSnapshot => option !== null,
+          )
+      if (!shippingOptions.length) {
         noShippingRoute = true
         continue
       }
+      shippingSnapshot = input.shippingSelection
+        ? shippingOptions.find(
+            (option) =>
+              option.courierCode === input.shippingSelection?.courierCode &&
+              option.service === input.shippingSelection?.service,
+          ) ?? null
+        : shippingOptions[0]
+      if (!shippingSnapshot) return { ok: false, reason: 'shipping-option-unavailable' }
     }
     chosen = { pharmacy, stock }
     break
@@ -234,6 +256,7 @@ export async function buildCheckoutQuote(
       items: snapshot.items,
       totals: snapshot.totals,
       shipping: shippingSnapshot,
+      shippingOptions,
       needsPrescription: snapshot.needsPrescription,
       prescriptionHours: hours.map((row) => ({
         weekday: row.weekday,
@@ -269,6 +292,9 @@ export async function requestCheckoutQuote(
         : null
   if (!fulfillmentMethod)
     throw new ApplicationError(400, 'INVALID_FULFILLMENT', 'Pilih pengiriman atau ambil di apotek.')
+  const shippingSelection = parseShippingSelection(input.shippingSelection)
+  if (shippingSelection && fulfillmentMethod !== 'delivery')
+    throw new ApplicationError(400, 'INVALID_SHIPPING_OPTION', 'Pilihan kurir hanya berlaku untuk pengiriman.')
   if (fulfillmentMethod === 'delivery' && !isUuid(String(input.addressId ?? '')))
     throw new ApplicationError(400, 'ADDRESS_REQUIRED', 'Pilih alamat pengiriman.')
 
@@ -277,6 +303,7 @@ export async function requestCheckoutQuote(
     addressId: input.addressId ?? null,
     fulfillmentMethod,
     items: parsedItems.items,
+    shippingSelection,
   }, shipping)
   if (!result.ok && result.reason === 'address-not-found')
     throw new ApplicationError(404, 'ADDRESS_NOT_FOUND', 'Alamat tidak ditemukan.')
@@ -304,6 +331,12 @@ export async function requestCheckoutQuote(
       'PRODUCT_DIMENSIONS_NOT_CONFIGURED',
       'Dimensi kemasan satu per satu produk belum diatur. Minta admin melengkapi lebar, tinggi, dan panjang dalam cm.',
     )
+  if (!result.ok && result.reason === 'shipping-option-unavailable')
+    throw new ApplicationError(
+      409,
+      'SHIPPING_OPTION_UNAVAILABLE',
+      'Tarif kurir berubah. Buat ulang quote dan pilih layanan yang masih tersedia.',
+    )
   if (!result.ok && result.reason === 'shipping-unavailable')
     throw new ApplicationError(
       409,
@@ -330,6 +363,19 @@ export async function requestCheckoutQuote(
     message:
       'Ongkir memakai tarif RajaOngkir saat quote dibuat dan berlaku sampai quote kedaluwarsa. Harga dan stok diperiksa sekali lagi saat pesanan dibuat.',
   }
+}
+
+function parseShippingSelection(value: unknown) {
+  if (value === undefined || value === null) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new ApplicationError(400, 'INVALID_SHIPPING_OPTION', 'Pilihan kurir dan layanan tidak valid.')
+
+  const selection = value as { courierCode?: unknown; service?: unknown }
+  const courierCode = String(selection.courierCode ?? '').trim().toLowerCase()
+  const service = String(selection.service ?? '').trim()
+  if (!/^[a-z0-9_-]{2,30}$/.test(courierCode) || !service || service.length > 80)
+    throw new ApplicationError(400, 'INVALID_SHIPPING_OPTION', 'Pilihan kurir dan layanan tidak valid.')
+  return { courierCode, service }
 }
 
 function isUuid(value: string) {

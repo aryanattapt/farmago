@@ -1,5 +1,6 @@
 import { ApplicationError } from '../../../shared/application-error'
 import { RajaOngkirClient, type RajaOngkirRate } from '../infrastructure/rajaongkir.client'
+import { listActiveRajaOngkirCourierCodes } from '../infrastructure/rajaongkir-courier.repository'
 
 export type ShippingOption = {
   provider: 'RajaOngkir'
@@ -34,19 +35,28 @@ export async function searchShippingDestinations(rawSearch: unknown) {
   return value
 }
 
+export async function calculateShippingOptions(input: {
+  originId: number
+  destinationId: number
+  weightGrams: number
+}): Promise<ShippingSnapshot[]> {
+  if (!Number.isSafeInteger(input.originId) || input.originId <= 0 ||
+      !Number.isSafeInteger(input.destinationId) || input.destinationId <= 0 ||
+      !Number.isSafeInteger(input.weightGrams) || input.weightGrams <= 0 || input.weightGrams > MAX_PARCEL_WEIGHT_GRAMS)
+    throw new ApplicationError(422, 'INVALID_SHIPPING_REQUEST', 'Lokasi dan berat paket tidak valid untuk menghitung ongkir.')
+  const courierCodes = await listActiveRajaOngkirCourierCodes()
+  const rates = await getClient().calculateDomesticCost(input, courierCodes)
+  return [...rates]
+    .sort(compareRates)
+    .map((rate) => toShippingSnapshot(rate, input.originId, input.destinationId, input.weightGrams))
+}
+
 export async function calculateLowestShippingOption(input: {
   originId: number
   destinationId: number
   weightGrams: number
 }): Promise<ShippingSnapshot | null> {
-  if (!Number.isSafeInteger(input.originId) || input.originId <= 0 ||
-      !Number.isSafeInteger(input.destinationId) || input.destinationId <= 0 ||
-      !Number.isSafeInteger(input.weightGrams) || input.weightGrams <= 0 || input.weightGrams > MAX_PARCEL_WEIGHT_GRAMS)
-    throw new ApplicationError(422, 'INVALID_SHIPPING_REQUEST', 'Lokasi dan berat paket tidak valid untuk menghitung ongkir.')
-  const rates = await getClient().calculateDomesticCost(input)
-  const selected = [...rates].sort(compareRates)[0]
-  if (!selected) return null
-  return toShippingSnapshot(selected, input.originId, input.destinationId, input.weightGrams)
+  return (await calculateShippingOptions(input))[0] ?? null
 }
 
 export function packageWeightGrams(items: Array<{ quantity: number; shippingWeightGrams: number }>) {

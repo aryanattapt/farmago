@@ -5,6 +5,7 @@ export type CreateQuoteRequestDto = {
   items?: unknown
   fulfillmentMethod?: string
   addressId?: string
+  shippingSelection?: unknown
 }
 
 export type BuildQuoteInputDto = {
@@ -12,6 +13,7 @@ export type BuildQuoteInputDto = {
   addressId: string | null
   fulfillmentMethod: 'pickup' | 'delivery'
   items: CartItem[]
+  shippingSelection?: { courierCode: string; service: string }
 }
 
 export type QuoteAddressDto = {
@@ -33,4 +35,5 @@ export type QuoteResponseDto = {
   needsPrescription: boolean
   prescriptionHours: Array<{ weekday: number; opensAt: string; closesAt: string; timezone: string }>
   shipping: import('../../shipping/public').ShippingSnapshot | null
+  shippingOptions: import('../../shipping/public').ShippingSnapshot[]
 }
