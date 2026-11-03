@@ -37,11 +37,17 @@ Katalog dapat dijelajahi tanpa login. Untuk transaksi, daftar lalu gunakan tauta
 - Pemeriksaan stok dan harga ulang saat pesanan dibuat; quote berubah memerlukan persetujuan ulang; job melepas reservasi yang belum dibayar setelah batas waktu.
 - Pemenuhan mencatat hasil pemeriksaan akhir; produk yang ditandai perlu pelacakan batch mewajibkan nomor lot, tanggal kedaluwarsa yang belum lewat, dan jumlah lot sesuai pesanan. Pesanan resep harus disahkan apoteker sebelum siap; pemeriksaan gagal membuka kasus operasional untuk CS.
 
+## Email reset kata sandi
+
+Di production, tautan reset dikirim lewat SMTP. Isi `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, dan `EMAIL_FROM` pada `.env` atau `.env.production` sesuai pengaturan mail hosting/domain. Umumnya port 465 memakai `SMTP_SECURE=true` (TLS), sedangkan port 587 memakai `SMTP_SECURE=false` dengan STARTTLS. Jika relay SMTP mengizinkan koneksi tanpa autentikasi, `SMTP_USER` dan `SMTP_PASSWORD` boleh dikosongkan. Pastikan `EMAIL_FROM` diizinkan oleh server SMTP, domain pengirim memiliki konfigurasi SPF/DKIM dari provider email, dan `WEB_ORIGIN` mengarah ke alamat web publik.
+
+API tetap mengembalikan pesan generik dan tidak menyertakan tautan reset di production. Di development, API menyertakan `resetUrl` agar alur bisa diuji manual. Token berlaku 30 menit. Akun harus memiliki email terdaftar; reset untuk akun yang hanya memiliki nomor telepon memerlukan adapter SMS terpisah.
+
 ## Integrasi dan gerbang sebelum pilot
 
 Kutipan tarif pengiriman memakai RajaOngkir API v2. Untuk mengaktifkannya, isi `RAJAONGKIR_API_KEY`, `RAJAONGKIR_COURIERS`, dan bila perlu `RAJAONGKIR_PACKAGING_WEIGHT_GRAMS` pada environment API; API key hanya disimpan di server. Atur ID lokasi asal subdistrict masing-masing apotek melalui panel admin. Cabang yang belum memiliki titik asal RajaOngkir tidak menawarkan pengiriman. Jalankan migrasi terbaru, lalu lengkapi berat kemasan (gram) pada tiap produk di panel admin. Pelanggan memilih area tujuan dari hasil pencarian RajaOngkir; tarif dan layanan terendah disimpan pada quote selama masa berlakunya.
 
-Integrasi ini menghitung biaya dan estimasi layanan. Pembuatan label/booking kurir serta pickup kurir belum tersedia; pembayaran, email/SMS, dan kebijakan refund final juga masih memerlukan adapter atau keputusan operasional. Akun internal memakai TOTP MFA dan kode pemulihan sekali pakai. Jangan menganggap aplikasi ini siap produksi/pilot sebelum gerbang hukum, farmasi, keamanan, operasional, retensi data, malware scanning, object storage privat, notifikasi, backup, kebijakan refund, dan UAT di planning dipenuhi.
+Integrasi ini menghitung biaya dan estimasi layanan. Pembuatan label/booking kurir serta pickup kurir belum tersedia; pembayaran, notifikasi operasional, SMS, dan kebijakan refund final juga masih memerlukan adapter atau keputusan operasional. Akun internal memakai TOTP MFA dan kode pemulihan sekali pakai. Jangan menganggap aplikasi ini siap produksi/pilot sebelum gerbang hukum, farmasi, keamanan, operasional, retensi data, malware scanning, object storage privat, notifikasi, backup, kebijakan refund, dan UAT di planning dipenuhi.
 
 Unggahan saat ini disimpan privat di `apps/api/storage/` dan folder tersebut dikecualikan dari Git. Produksi memerlukan object storage privat dan pemindaian malware. Data produk seed hanyalah data contoh untuk development.
 

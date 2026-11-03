@@ -62,6 +62,7 @@ export async function issueToken(
   type: string,
   target: string | null,
   client: any = pool,
+  options?: { returnUrlInProduction?: boolean },
 ) {
   const token = randomBytes(32).toString('base64url')
   if (client === pool) {
@@ -80,7 +81,9 @@ export async function issueToken(
     )
   }
   const parameter = type === 'password_reset' ? 'reset' : 'verify'
-  return process.env.NODE_ENV === 'production'
+  const url = new URL('/', WEB_ORIGIN)
+  url.searchParams.set(parameter, token)
+  return process.env.NODE_ENV === 'production' && !options?.returnUrlInProduction
     ? null
-    : `${WEB_ORIGIN}/?${parameter}=${encodeURIComponent(token)}`
+    : url.toString()
 }

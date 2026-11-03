@@ -32,13 +32,23 @@ export interface IdentityRepository {
   ): Promise<{ verificationUrl: string | null }>
   verifyContact(tokenHash: string): Promise<boolean>
   resetPassword(tokenHash: string, passwordHash: string): Promise<boolean>
-  findUserIdByContact(contact: string): Promise<string | null>
+  findPasswordResetAccount(contact: string): Promise<{ id: string; email: string | null } | null>
   findLoginAccount(contact: string): Promise<{ account: LoginAccount; roles: LoginRole[] } | null>
   consumeRecoveryCode(userId: string, codeHash: string): Promise<boolean>
   revokeSession(tokenHash: string): Promise<void>
   createSession(userId: string): Promise<{ token: string; csrf: string }>
-  issueToken(userId: string, type: string, target: string | null): Promise<string | null>
+  issueToken(
+    userId: string,
+    type: string,
+    target: string | null,
+    options?: { returnUrlInProduction?: boolean },
+  ): Promise<string | null>
   findUserForSessionToken(token: string | null): Promise<User | null>
+}
+
+export interface PasswordResetMailer {
+  isConfigured(): boolean
+  sendPasswordResetEmail(to: string, resetUrl: string): Promise<void>
 }
 
 export interface MfaVerifier {
@@ -88,6 +98,7 @@ export async function verifyIdentityContact(
 
 export async function resetIdentityPassword(
   repository: IdentityRepository,
+  mailer: PasswordResetMailer,
   input: PasswordResetRequestDto,
 ) {
   if (input.token && input.newPassword) {
@@ -106,8 +117,37 @@ export async function resetIdentityPassword(
   const contact = String(input.contact ?? '')
     .trim()
     .toLowerCase()
-  const userId = await repository.findUserIdByContact(contact)
-  const resetUrl = userId ? await repository.issueToken(userId, 'password_reset', contact) : null
+  const account = await repository.findPasswordResetAccount(contact)
+  const isProduction = process.env.NODE_ENV === 'production'
+  let resetUrl: string | null = null
+
+  if (account && isProduction) {
+    if (account.email && mailer.isConfigured()) {
+      const deliveryUrl = await repository.issueToken(
+        account.id,
+        'password_reset',
+        account.email,
+        { returnUrlInProduction: true },
+      )
+      if (deliveryUrl) {
+        try {
+          await mailer.sendPasswordResetEmail(account.email, deliveryUrl)
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              event: 'auth.password_reset_email_failed',
+              error: error instanceof Error ? error.message : 'unknown',
+            }),
+          )
+        }
+      }
+    } else if (account.email) {
+      console.error(JSON.stringify({ event: 'auth.password_reset_email_not_configured' }))
+    }
+  } else if (account) {
+    resetUrl = await repository.issueToken(account.id, 'password_reset', contact)
+  }
+
   return { message: 'Jika akun cocok, petunjuk pemulihan akan dikirim.', resetUrl }
 }
 

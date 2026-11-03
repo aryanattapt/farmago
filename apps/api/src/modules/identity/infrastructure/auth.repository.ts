@@ -76,13 +76,13 @@ export class PostgresIdentityRepository implements IdentityRepository {
     })
   }
 
-  async findUserIdByContact(contact: string) {
+  async findPasswordResetAccount(contact: string) {
     const [user] = await db
-      .select({ id: users.id })
+      .select({ id: users.id, email: users.email })
       .from(users)
       .where(or(sql`lower(${users.email}) = lower(${contact})`, eq(users.phone, contact)))
       .limit(1)
-    return user?.id ?? null
+    return user ?? null
   }
 
   async findLoginAccount(contact: string) {
@@ -136,8 +136,13 @@ export class PostgresIdentityRepository implements IdentityRepository {
     return createSession(userId)
   }
 
-  issueToken(userId: string, type: string, target: string | null) {
-    return issueToken(userId, type, target)
+  issueToken(
+    userId: string,
+    type: string,
+    target: string | null,
+    options?: { returnUrlInProduction?: boolean },
+  ) {
+    return issueToken(userId, type, target, undefined, options)
   }
 
   findUserForSessionToken(token: string | null) {

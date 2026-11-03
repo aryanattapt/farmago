@@ -16,8 +16,10 @@ import type {
   RegisterRequestDto,
 } from './application/auth.dto'
 import { PostgresIdentityRepository } from './infrastructure/auth.repository'
+import { SmtpPasswordResetMailer } from './infrastructure/password-reset-email'
 
 const repository = new PostgresIdentityRepository()
+const passwordResetMailer = new SmtpPasswordResetMailer()
 const mfa = {
   verify: (encryptedSecret: string, code: string) =>
     verifyTotp(decryptMfaSecret(encryptedSecret), code),
@@ -32,7 +34,7 @@ export const registerIdentityAccount = (input: RegisterRequestDto) =>
 export const verifyIdentityAccountContact = (input: ContactVerificationRequestDto) =>
   verifyIdentityContact(repository, input)
 export const resetIdentityAccountPassword = (input: PasswordResetRequestDto) =>
-  resetIdentityPassword(repository, input)
+  resetIdentityPassword(repository, passwordResetMailer, input)
 export const loginIdentityAccount = (input: LoginRequestDto) =>
   loginIdentity(repository, mfa, input)
 export const logoutIdentitySession = (token: string | null) => logoutIdentity(repository, token)
