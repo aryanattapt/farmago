@@ -20,6 +20,7 @@ export type QuoteAddressDto = {
   addressText: string
   city: string
   postalCode: string
+  rajaongkirDestinationId: number
 }
 
 export type QuoteResponseDto = {
@@ -31,4 +32,5 @@ export type QuoteResponseDto = {
   totals: QuoteSnapshot['totals']
   needsPrescription: boolean
   prescriptionHours: Array<{ weekday: number; opensAt: string; closesAt: string; timezone: string }>
+  shipping: import('../../shipping/public').ShippingSnapshot | null
 }

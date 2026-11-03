@@ -13,7 +13,7 @@ const item = {
   lineTotal: '20.00',
 }
 const totals = { subtotal: '20.00', discount: '0.00', shippingFee: '0.00', serviceFee: '1.00', total: '21.00' }
-const address = { recipientName: 'Arya', phone: '0812', addressText: 'Jl. Mawar', city: 'Jakarta', postalCode: '11840' }
+const address = { recipientName: 'Arya', phone: '0812', addressText: 'Jl. Mawar', city: 'Jakarta', postalCode: '11840', rajaongkirDestinationId: 123 }
 function fingerprint(options: { pharmacy?: string; method?: string; address?: typeof address | null; item?: typeof item; totals?: typeof totals } = {}) {
   return quoteFingerprint(options.pharmacy ?? 'pharmacy-1', options.method ?? 'pickup',
     options.address === undefined ? null : options.address, [options.item ?? item], options.totals ?? totals)
@@ -42,6 +42,7 @@ describe('quote fingerprint', () => {
     expect(fingerprint({ pharmacy: 'pharmacy-2' })).not.toBe(fingerprint())
     expect(fingerprint({ method: 'delivery' })).not.toBe(fingerprint())
     expect(fingerprint({ address })).not.toBe(fingerprint())
+    expect(fingerprint({ address: { ...address, rajaongkirDestinationId: 456 } })).not.toBe(fingerprint({ address }))
     expect(fingerprint({ totals: { ...totals, serviceFee: '1.01' } })).not.toBe(fingerprint())
   })
 })

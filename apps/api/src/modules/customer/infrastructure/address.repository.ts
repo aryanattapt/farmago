@@ -14,6 +14,7 @@ export class PostgresAddressRepository implements AddressRepository {
         addressText: addresses.addressText,
         city: addresses.city,
         postalCode: addresses.postalCode,
+        rajaongkirDestinationId: addresses.rajaongkirDestinationId,
         createdAt: addresses.createdAt,
       })
       .from(addresses)
@@ -31,6 +32,7 @@ export class PostgresAddressRepository implements AddressRepository {
         addressText: address.addressText,
         city: address.city,
         postalCode: address.postalCode,
+        rajaongkirDestinationId: address.rajaongkirDestinationId,
       })
       .returning({
         id: addresses.id,
@@ -39,6 +41,7 @@ export class PostgresAddressRepository implements AddressRepository {
         addressText: addresses.addressText,
         city: addresses.city,
         postalCode: addresses.postalCode,
+        rajaongkirDestinationId: addresses.rajaongkirDestinationId,
       })
     return saved
   }
@@ -52,6 +55,7 @@ export class PostgresAddressRepository implements AddressRepository {
         addressText: address.addressText,
         city: address.city,
         postalCode: address.postalCode,
+        rajaongkirDestinationId: address.rajaongkirDestinationId,
         updatedAt: sql`now()`,
       })
       .where(and(eq(addresses.id, addressId), eq(addresses.userId, userId)))

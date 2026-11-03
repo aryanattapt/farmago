@@ -51,6 +51,7 @@ export async function getOrderView(
       serviceFee: amount(order.service_fee),
       total: amount(order.total),
     },
+    shipping: order.shipping_snapshot ?? null,
     expiresAt: order.expires_at,
     createdAt: order.created_at,
     prescriptions: prescriptions.map((prescription) => ({

@@ -65,6 +65,7 @@ export class PostgresOrderReadRepository implements OrderListRepository {
         subtotal: orders.subtotal,
         discount: orders.discount,
         shipping_fee: orders.shippingFee,
+        shipping_snapshot: orders.shippingSnapshot,
         service_fee: orders.serviceFee,
         total: orders.total,
         expires_at: orders.expiresAt,

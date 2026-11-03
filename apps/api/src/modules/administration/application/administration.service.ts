@@ -21,6 +21,7 @@ export type AdministrationProductRow = {
   indicative_price: string
   available: number
   status: string
+  shipping_weight_grams: number
 }
 export type AdministrationPharmacyRow = {
   id: string
@@ -30,6 +31,7 @@ export type AdministrationPharmacyRow = {
   postal_codes: string[]
   status: string
   license_reference: string | null
+  rajaongkir_origin_id: number | null
   created_at: Date
 }
 export type AdministrationOrderRow = {
@@ -98,11 +100,18 @@ export interface AdministrationRepository {
   updatePharmacy(
     actorId: string,
     pharmacyId: string,
-    status: string,
+    status: string | null,
+    originId?: number | null,
   ): Promise<AdministrationResult<unknown>>
 }
 
-export type ProductValues = { sku: string; name: string; category: string; sellUnit: string }
+export type ProductValues = {
+  sku: string
+  name: string
+  category: string
+  sellUnit: string
+  shippingWeightGrams: number
+}
 export type InventoryValues = {
   pharmacyId: string
   productId: string
@@ -119,12 +128,14 @@ export type PharmacyValues = {
   address: string
   city: string
   postalCodes: string[]
+  rajaongkirOriginId: number | null
 }
 
 export async function listAdminProducts(repository: AdministrationRepository) {
   return (await repository.listProducts()).map((row) => ({
     ...publicProduct(row),
     status: row.status,
+    shippingWeightGrams: row.shipping_weight_grams,
   }))
 }
 
@@ -137,6 +148,7 @@ export async function listAdminPharmacies(repository: AdministrationRepository) 
     postalCodes: row.postal_codes,
     status: row.status,
     licenseReference: row.license_reference,
+    rajaongkirOriginId: row.rajaongkir_origin_id,
     createdAt: row.created_at,
   }))
 }
@@ -193,6 +205,7 @@ export function createAdminProduct(
   const name = String(input.name ?? '').trim()
   const category = String(input.category ?? '').trim()
   const sellUnit = String(input.sellUnit ?? '').trim()
+  const shippingWeightGrams = Number(input.shippingWeightGrams)
   if (
     !/^[A-Z0-9_-]{2,40}$/.test(sku) ||
     name.length < 2 ||
@@ -200,14 +213,17 @@ export function createAdminProduct(
     category.length < 2 ||
     category.length > 80 ||
     sellUnit.length < 2 ||
-    sellUnit.length > 100
+    sellUnit.length > 100 ||
+    !Number.isSafeInteger(shippingWeightGrams) ||
+    shippingWeightGrams < 1 ||
+    shippingWeightGrams > 30000
   )
     throw new ApplicationError(
       400,
       'INVALID_PRODUCT',
-      'SKU, nama, kategori, dan satuan jual harus diisi dengan benar.',
+      'SKU, nama, kategori, satuan jual, dan berat kemasan 1 sampai 30000 gram harus valid.',
     )
-  return repository.createProduct(actorId, input, { sku, name, category, sellUnit })
+  return repository.createProduct(actorId, input, { sku, name, category, sellUnit, shippingWeightGrams })
 }
 
 export async function configureAdminInventory(
@@ -264,6 +280,7 @@ export async function updateAdminProduct(
     'requiresPrescription',
     'batchTrackingRequired',
     'specialHandling',
+    'shippingWeightGrams',
     'status',
   ]
   if (Object.keys(input).some((key) => !allowed.includes(key)))
@@ -272,6 +289,12 @@ export async function updateAdminProduct(
       'INVALID_PRODUCT',
       'Perubahan produk memuat field yang tidak didukung.',
     )
+  if (
+    input.shippingWeightGrams != null &&
+    (!Number.isSafeInteger(Number(input.shippingWeightGrams)) ||
+      Number(input.shippingWeightGrams) < 0 || Number(input.shippingWeightGrams) > 30000)
+  )
+    throw new ApplicationError(400, 'INVALID_PRODUCT', 'Berat kemasan harus berupa bilangan bulat 0 sampai 30000 gram.')
   if (input.status !== undefined && !['active', 'inactive'].includes(input.status))
     throw new ApplicationError(400, 'INVALID_STATUS', 'Status produk tidak valid.')
   const result = await repository.updateProduct(actorId, productId, input)
@@ -290,6 +313,10 @@ export function createAdminPharmacy(
   const postalCodes = Array.isArray(input.postalCodes)
     ? [...new Set(input.postalCodes.map((value) => String(value).trim()))]
     : []
+  const rajaongkirOriginId =
+    input.rajaongkirOriginId == null || input.rajaongkirOriginId === ''
+      ? null
+      : Number(input.rajaongkirOriginId)
   if (
     name.length < 2 ||
     name.length > 160 ||
@@ -298,14 +325,16 @@ export function createAdminPharmacy(
     city.length < 2 ||
     city.length > 100 ||
     !postalCodes.length ||
-    postalCodes.some((code) => !/^\d{4,10}$/.test(code))
+    postalCodes.some((code) => !/^\d{4,10}$/.test(code)) ||
+    (rajaongkirOriginId != null &&
+      (!Number.isSafeInteger(rajaongkirOriginId) || rajaongkirOriginId <= 0))
   )
     throw new ApplicationError(
       400,
       'INVALID_PHARMACY',
       'Nama, alamat, kota, dan kode pos layanan harus valid.',
     )
-  return repository.createPharmacy(actorId, input, { name, address, city, postalCodes })
+  return repository.createPharmacy(actorId, input, { name, address, city, postalCodes, rajaongkirOriginId })
 }
 
 export async function updateAdminPharmacy(
@@ -314,10 +343,22 @@ export async function updateAdminPharmacy(
   pharmacyId: string,
   input: UpdatePharmacyRequestDto,
 ) {
-  const status = String(input.status ?? '')
-  if (!['pending', 'active', 'suspended'].includes(status))
+  const status = input.status == null ? null : String(input.status)
+  const hasOrigin = input.rajaongkirOriginId !== undefined
+  let originId: number | null | undefined
+  if (status !== null && !['pending', 'active', 'suspended'].includes(status))
     throw new ApplicationError(400, 'INVALID_STATUS', 'Status apotek tidak valid.')
-  const result = await repository.updatePharmacy(actorId, pharmacyId, status)
+  if (hasOrigin) {
+    originId =
+      input.rajaongkirOriginId == null || input.rajaongkirOriginId === ''
+        ? null
+        : Number(input.rajaongkirOriginId)
+    if (originId != null && (!Number.isSafeInteger(originId) || originId <= 0))
+      throw new ApplicationError(400, 'INVALID_SHIPPING_ORIGIN', 'ID lokasi asal RajaOngkir tidak valid.')
+  }
+  if (status === null && !hasOrigin)
+    throw new ApplicationError(400, 'INVALID_PHARMACY_UPDATE', 'Perubahan apotek kosong.')
+  const result = await repository.updatePharmacy(actorId, pharmacyId, status, originId)
   if (result.ok) return result.value
   if (result.reason === 'not-found')
     throw new ApplicationError(404, 'NOT_FOUND', 'Apotek tidak ditemukan.')

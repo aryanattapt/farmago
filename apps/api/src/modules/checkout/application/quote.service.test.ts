@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test'
+import { ApplicationError } from '../../../shared/application-error'
 import {
   buildCheckoutQuote,
   requestCheckoutQuote,
   type CheckoutRepository,
+  type ShippingCalculator,
 } from './quote.service'
 import type { BuildQuoteInputDto } from './quote.dto'
 
@@ -14,17 +16,17 @@ const PRODUCT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const ADDRESS_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 const makeAddress = (): AddressRow => ({
   id: ADDRESS_ID, recipient_name: 'Arya', phone: '0812', address_text: 'Jl. Mawar',
-  city: 'Jakarta', postal_code: '11840',
+  city: 'Jakarta', postal_code: '11840', rajaongkir_destination_id: 123,
 })
 const makePharmacy = (id = 'pharmacy-1', overrides: Partial<PharmacyRow> = {}): PharmacyRow => ({
   id, name: 'Apotek ' + id, address_text: 'Jl. Sehat', postal_codes: ['11840'],
-  delivery_fee: '4.50', ...overrides,
+  delivery_fee: '4.50', rajaongkir_origin_id: 456, ...overrides,
 })
 const makeStock = (overrides: Partial<StockRow> = {}): StockRow => ({
   id: PRODUCT_ID, sku: 'SKU-1', name: 'Vitamin C', sell_unit: 'botol',
   category: 'Vitamin', requires_prescription: false, batch_tracking_required: false,
   status: 'active', special_handling: false, unit_price: '10.25',
-  available: 10, sales_blocked: false, ...overrides,
+  available: 10, sales_blocked: false, shipping_weight_grams: 100, ...overrides,
 })
 function makeRepository(options: {
   address?: AddressRow | null
@@ -64,6 +66,13 @@ function makeRepository(options: {
     },
   }
   return { repository, calls }
+}
+const shipping: ShippingCalculator = {
+  calculate: async ({ originId, destinationId, weightGrams }) => ({
+    provider: 'RajaOngkir' as const,
+    courierName: 'JNE', courierCode: 'jne', service: 'REG', description: 'Regular',
+    cost: '12500.00', etd: '2-3 hari', originId, destinationId, weightGrams,
+  }),
 }
 const pickup: BuildQuoteInputDto = {
   customerId: 'customer-1', addressId: null, fulfillmentMethod: 'pickup',
@@ -134,16 +143,47 @@ describe('checkout quote use case', () => {
     })
     const result = await buildCheckoutQuote(repository, {
       ...pickup, addressId: ADDRESS_ID, fulfillmentMethod: 'delivery',
-    })
+    }, shipping)
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.quote.pharmacy.id).toBe('delivery')
-    expect(result.quote.totals.shippingFee).toBe('7.50')
+    expect(result.quote.totals.shippingFee).toBe('12500.00')
+    expect(result.quote.shipping).toMatchObject({ originId: 456, destinationId: 123, weightGrams: 450, courierCode: 'jne' })
     expect(calls.stock.map(([id]) => id)).toEqual(['delivery'])
     expect(calls.saved[0]).toMatchObject({
       addressId: ADDRESS_ID,
-      addressSnapshot: { recipientName: 'Arya', postalCode: '11840' },
+      addressSnapshot: { recipientName: 'Arya', postalCode: '11840', rajaongkirDestinationId: 123 },
+      shippingSnapshot: { originId: 456, destinationId: 123, weightGrams: 450 },
     })
+  })
+
+  test('tries another eligible pharmacy when the first origin has no courier route', async () => {
+    const { repository } = makeRepository({
+      pharmacies: [
+        makePharmacy('no-route', { rajaongkir_origin_id: 111 }),
+        makePharmacy('route', { rajaongkir_origin_id: 222 }),
+      ],
+    })
+    const originCalls: number[] = []
+    const provider: ShippingCalculator = {
+      calculate: async ({ originId, destinationId, weightGrams }) => {
+        originCalls.push(originId)
+        if (originId === 111) return null
+        return {
+          provider: 'RajaOngkir' as const,
+          courierName: 'JNE', courierCode: 'jne', service: 'REG', description: 'Regular',
+          cost: '9000.00', etd: '1-2 hari', originId, destinationId, weightGrams,
+        }
+      },
+    }
+    const result = await buildCheckoutQuote(repository, {
+      ...pickup, addressId: ADDRESS_ID, fulfillmentMethod: 'delivery',
+    }, provider)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.quote.pharmacy.id).toBe('route')
+    expect(result.quote.totals.shippingFee).toBe('9000.00')
+    expect(originCalls).toEqual([111, 222])
   })
 
   test('returns address-not-found and pharmacy-unavailable reasons', async () => {
@@ -165,10 +205,31 @@ describe('checkout quote use case', () => {
       items: [{ productId: PRODUCT_ID, quantity: 1 }], fulfillmentMethod: 'invalid',
     })).rejects.toMatchObject({ status: 400, code: 'INVALID_FULFILLMENT' })
     await expect(requestCheckoutQuote(repository, 'customer-1', {
-      items: [{ productId: PRODUCT_ID, quantity: 1 }], fulfillmentMethod: 'delivery',
-    })).rejects.toMatchObject({ status: 422, code: 'SHIPPING_PROVIDER_NOT_CONFIGURED' })
-    expect(calls.stock).toEqual([])
+      items: [{ productId: PRODUCT_ID, quantity: 1 }], fulfillmentMethod: 'delivery', addressId: ADDRESS_ID,
+    }, {
+      calculate: async () => { throw new ApplicationError(503, 'SHIPPING_PROVIDER_NOT_CONFIGURED', 'Not configured') },
+    })).rejects.toMatchObject({ status: 503, code: 'SHIPPING_PROVIDER_NOT_CONFIGURED' })
+    expect(calls.stock).toEqual([['pharmacy-1', [PRODUCT_ID]]])
     expect(calls.saved).toEqual([])
+  })
+
+  test('requires a resolved destination and known product weights for delivery', async () => {
+    const noDestinationAddress = { ...makeAddress(), rajaongkir_destination_id: null }
+    const noDestination = makeRepository({ address: noDestinationAddress })
+    expect(await buildCheckoutQuote(noDestination.repository, {
+      ...pickup, addressId: ADDRESS_ID, fulfillmentMethod: 'delivery',
+    }, shipping)).toEqual({ ok: false, reason: 'address-destination-missing' })
+    expect(noDestination.calls.stock).toEqual([])
+
+    const noWeight = makeRepository({ stocks: { 'pharmacy-1': [makeStock({ shipping_weight_grams: 0 })] } })
+    expect(await buildCheckoutQuote(noWeight.repository, {
+      ...pickup, addressId: ADDRESS_ID, fulfillmentMethod: 'delivery',
+    }, shipping)).toEqual({ ok: false, reason: 'shipping-weight-missing' })
+
+    const noOrigin = makeRepository({ pharmacies: [makePharmacy('no-origin', { rajaongkir_origin_id: null })] })
+    expect(await buildCheckoutQuote(noOrigin.repository, {
+      ...pickup, addressId: ADDRESS_ID, fulfillmentMethod: 'delivery',
+    }, shipping)).toEqual({ ok: false, reason: 'shipping-origin-missing' })
   })
 
   test('maps unavailable stock to a conflict and returns reservation metadata', async () => {

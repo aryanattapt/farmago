@@ -33,6 +33,7 @@ export function quoteFingerprint(
         addressSnapshot.addressText,
         addressSnapshot.city,
         addressSnapshot.postalCode,
+        addressSnapshot.rajaongkirDestinationId ?? null,
       ]
     : null
   return createHash('sha256')

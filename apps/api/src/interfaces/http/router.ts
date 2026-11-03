@@ -13,6 +13,7 @@ import { handleFulfillmentRoutes } from '../../modules/fulfillment'
 import { handleSupportRoutes } from '../../modules/support'
 import { handleAdminRoutes } from '../../modules/administration'
 import { handlePharmacyRoutes } from '../../modules/pharmacy'
+import { handleShippingRoutes } from '../../modules/shipping'
 
 export async function route(
   request: Request,
@@ -51,6 +52,7 @@ export async function route(
     handleSupportRoutes,
     handleAdminRoutes,
     handlePharmacyRoutes,
+    handleShippingRoutes,
   ]
   for (const handler of authenticatedHandlers) {
     const response = await handler(authenticatedContext)

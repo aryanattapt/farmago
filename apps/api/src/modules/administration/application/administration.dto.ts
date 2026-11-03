@@ -7,6 +7,7 @@ export type CreateProductRequestDto = {
   requiresPrescription?: boolean
   batchTrackingRequired?: boolean
   specialHandling?: boolean
+  shippingWeightGrams?: number | string
 }
 
 export type ConfigureInventoryRequestDto = {
@@ -25,6 +26,7 @@ export type UpdateProductRequestDto = {
   requiresPrescription?: boolean | null
   batchTrackingRequired?: boolean | null
   specialHandling?: boolean | null
+  shippingWeightGrams?: number | string | null
   status?: string
 }
 
@@ -34,8 +36,10 @@ export type CreatePharmacyRequestDto = {
   city?: string
   postalCodes?: unknown
   licenseReference?: string
+  rajaongkirOriginId?: number | string | null
 }
 
 export type UpdatePharmacyRequestDto = {
   status?: string
+  rajaongkirOriginId?: number | string | null
 }

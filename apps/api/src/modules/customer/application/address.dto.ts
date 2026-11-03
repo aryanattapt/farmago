@@ -4,4 +4,6 @@ export type AddressInputDto = {
   addressText: string
   city: string
   postalCode: string
+  rajaongkirDestinationId?: number | null
+  rajaongkirDestinationLabel?: string | null
 }

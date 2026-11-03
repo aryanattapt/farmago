@@ -23,7 +23,7 @@ Katalog dapat dijelajahi tanpa login. Untuk transaksi, daftar lalu gunakan tauta
 
 ## Yang tersedia
 
-- React + Vite untuk katalog, keranjang, checkout pickup, riwayat/detail pesanan, unggah resep, dan panel apotek/admin.
+- React + Vite untuk katalog, keranjang, checkout pickup dan pengiriman bertarif RajaOngkir, riwayat/detail pesanan, unggah resep, dan panel apotek/admin.
 - Bun HTTP API dengan sesi cookie HttpOnly, CSRF untuk mutasi, hashing kata sandi adaptif, RBAC berbasis penugasan, dan pembatasan unggah resep privat.
 - PostgreSQL schema untuk quote, snapshot harga, reservasi stok transaksional, masa reservasi, audit, review versi resep, pemenuhan, pembayaran, refund, kasus bantuan, dan outbox.
 - Pemeriksaan stok dan harga ulang saat pesanan dibuat; quote berubah memerlukan persetujuan ulang; job melepas reservasi yang belum dibayar setelah batas waktu.
@@ -31,7 +31,9 @@ Katalog dapat dijelajahi tanpa login. Untuk transaksi, daftar lalu gunakan tauta
 
 ## Integrasi dan gerbang sebelum pilot
 
-Dokumen planning belum menetapkan penyedia pembayaran/kurir, tarif pengiriman, email/SMS, atau kebijakan refund final. Pengiriman belum aktif; pickup bisa digunakan. Pembuatan tagihan dan booking pengiriman mengembalikan `503` sampai adapter idempotent dipasang. Akun internal memakai TOTP MFA dan kode pemulihan sekali pakai. Jangan menganggap aplikasi ini siap produksi/pilot sebelum gerbang hukum, farmasi, keamanan, operasional, retensi data, malware scanning, object storage privat, notifikasi, backup, kebijakan refund, dan UAT di planning dipenuhi.
+Kutipan tarif pengiriman memakai RajaOngkir API v2. Untuk mengaktifkannya, isi `RAJAONGKIR_API_KEY`, `RAJAONGKIR_COURIERS`, dan bila perlu `RAJAONGKIR_PACKAGING_WEIGHT_GRAMS` pada environment API; API key hanya disimpan di server. Atur ID lokasi asal subdistrict masing-masing apotek melalui panel admin. Cabang yang belum memiliki titik asal RajaOngkir tidak menawarkan pengiriman. Jalankan migrasi terbaru, lalu lengkapi berat kemasan (gram) pada tiap produk di panel admin. Pelanggan memilih area tujuan dari hasil pencarian RajaOngkir; tarif dan layanan terendah disimpan pada quote selama masa berlakunya.
+
+Integrasi ini menghitung biaya dan estimasi layanan. Pembuatan label/booking kurir serta pickup kurir belum tersedia; pembayaran, email/SMS, dan kebijakan refund final juga masih memerlukan adapter atau keputusan operasional. Akun internal memakai TOTP MFA dan kode pemulihan sekali pakai. Jangan menganggap aplikasi ini siap produksi/pilot sebelum gerbang hukum, farmasi, keamanan, operasional, retensi data, malware scanning, object storage privat, notifikasi, backup, kebijakan refund, dan UAT di planning dipenuhi.
 
 Unggahan saat ini disimpan privat di `apps/api/storage/` dan folder tersebut dikecualikan dari Git. Produksi memerlukan object storage privat dan pemindaian malware. Data produk seed hanyalah data contoh untuk development.
 

@@ -21,6 +21,7 @@ export class PostgresCheckoutRepository implements CheckoutRepository {
         address_text: addresses.addressText,
         city: addresses.city,
         postal_code: addresses.postalCode,
+        rajaongkir_destination_id: addresses.rajaongkirDestinationId,
       })
       .from(addresses)
       .where(and(eq(addresses.id, addressId), eq(addresses.userId, customerId)))
@@ -36,6 +37,7 @@ export class PostgresCheckoutRepository implements CheckoutRepository {
         address_text: pharmacies.addressText,
         postal_codes: pharmacies.postalCodes,
         delivery_fee: pharmacies.deliveryFee,
+        rajaongkir_origin_id: pharmacies.rajaongkirOriginId,
       })
       .from(pharmacies)
       .where(eq(pharmacies.status, 'active'))
@@ -57,6 +59,7 @@ export class PostgresCheckoutRepository implements CheckoutRepository {
         unit_price: inventory.unitPrice,
         available: sql<number>`${inventory.onHand} - ${inventory.reserved}`,
         sales_blocked: inventory.salesBlocked,
+        shipping_weight_grams: products.shippingWeightGrams,
       })
       .from(inventory)
       .innerJoin(products, eq(products.id, inventory.productId))
@@ -78,6 +81,7 @@ export class PostgresCheckoutRepository implements CheckoutRepository {
         fulfillmentMethod: input.fulfillmentMethod,
         itemsSnapshot: input.items,
         totalsSnapshot: input.totals,
+        shippingSnapshot: input.shippingSnapshot,
         inputFingerprint: input.fingerprint,
         expiresAt: sql`now() + interval '10 minutes'`,
       })

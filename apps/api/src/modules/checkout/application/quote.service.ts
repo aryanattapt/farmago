@@ -7,7 +7,12 @@ import type {
   QuoteAddressDto,
   QuoteResponseDto,
 } from './quote.dto'
-import { parseCartItems, type CartItem } from '../domain/cart'
+import { parseCartItems } from '../domain/cart'
+import {
+  calculateLowestShippingOption,
+  packageWeightGrams,
+  type ShippingSnapshot,
+} from '../../shipping/public'
 
 type AddressRow = {
   id: string
@@ -16,6 +21,7 @@ type AddressRow = {
   address_text: string
   city: string
   postal_code: string
+  rajaongkir_destination_id: number | null
 }
 
 type PharmacyRow = {
@@ -24,6 +30,7 @@ type PharmacyRow = {
   address_text: string
   postal_codes: string[]
   delivery_fee: string | null
+  rajaongkir_origin_id: number | null
 }
 
 type StockRow = {
@@ -39,6 +46,7 @@ type StockRow = {
   unit_price: string
   available: number
   sales_blocked: boolean
+  shipping_weight_grams: number
 }
 
 export interface CheckoutRepository {
@@ -55,6 +63,7 @@ export interface CheckoutRepository {
     items: QuoteSnapshot['items']
     totals: QuoteSnapshot['totals']
     fingerprint: string
+    shippingSnapshot: ShippingSnapshot | null
   }): Promise<{ id: string; expiresAt: Date }>
   listPrescriptionHours(
     pharmacyId: string,
@@ -63,11 +72,34 @@ export interface CheckoutRepository {
 
 export type BuildQuoteResult =
   | { ok: true; quote: QuoteResponseDto }
-  | { ok: false; reason: 'address-not-found' | 'pharmacy-unavailable' | 'stock-changed' }
+  | {
+      ok: false
+      reason:
+        | 'address-not-found'
+        | 'address-destination-missing'
+        | 'shipping-weight-missing'
+        | 'shipping-origin-missing'
+        | 'shipping-unavailable'
+        | 'pharmacy-unavailable'
+        | 'stock-changed'
+    }
+
+export type ShippingCalculator = {
+  calculate(input: {
+    originId: number
+    destinationId: number
+    weightGrams: number
+  }): Promise<ShippingSnapshot | null>
+}
+
+const defaultShippingCalculator: ShippingCalculator = {
+  calculate: calculateLowestShippingOption,
+}
 
 export async function buildCheckoutQuote(
   repository: CheckoutRepository,
   input: BuildQuoteInputDto,
+  shipping: ShippingCalculator = defaultShippingCalculator,
 ): Promise<BuildQuoteResult> {
   const address =
     input.fulfillmentMethod === 'delivery' && input.addressId
@@ -75,18 +107,18 @@ export async function buildCheckoutQuote(
       : null
   if (input.fulfillmentMethod === 'delivery' && !address)
     return { ok: false, reason: 'address-not-found' }
+  if (input.fulfillmentMethod === 'delivery' && !address?.rajaongkir_destination_id)
+    return { ok: false, reason: 'address-destination-missing' }
 
   let chosen: { pharmacy: PharmacyRow; stock: StockRow[] } | null = null
+  let shippingSnapshot: ShippingSnapshot | null = null
+  let missingShippingOrigin = false
+  let noShippingRoute = false
   for (const pharmacy of await repository.listActivePharmacies()) {
     if (
       input.fulfillmentMethod === 'delivery' &&
+      pharmacy.postal_codes.length > 0 &&
       !pharmacy.postal_codes.includes(address!.postal_code)
-    )
-      continue
-    if (
-      input.fulfillmentMethod === 'delivery' &&
-      pharmacy.delivery_fee == null &&
-      process.env.DELIVERY_FEE_DEFAULT == null
     )
       continue
 
@@ -111,10 +143,38 @@ export async function buildCheckoutQuote(
       !(await repository.isPrescriptionServiceOpen(pharmacy.id))
     )
       continue
+
+    if (input.fulfillmentMethod === 'delivery') {
+      if (!pharmacy.rajaongkir_origin_id) {
+        missingShippingOrigin = true
+        continue
+      }
+      const weightGrams = packageWeightGrams(
+        input.items.map((item) => ({
+          quantity: item.quantity,
+          shippingWeightGrams:
+            Number(stock.find((row) => row.id === item.productId)?.shipping_weight_grams) || 0,
+        })),
+      )
+      if (weightGrams == null) return { ok: false, reason: 'shipping-weight-missing' }
+      shippingSnapshot = await shipping.calculate({
+        originId: Number(pharmacy.rajaongkir_origin_id),
+        destinationId: Number(address!.rajaongkir_destination_id),
+        weightGrams,
+      })
+      if (!shippingSnapshot) {
+        noShippingRoute = true
+        continue
+      }
+    }
     chosen = { pharmacy, stock }
     break
   }
-  if (!chosen) return { ok: false, reason: 'pharmacy-unavailable' }
+  if (!chosen) {
+    if (noShippingRoute) return { ok: false, reason: 'shipping-unavailable' }
+    if (missingShippingOrigin) return { ok: false, reason: 'shipping-origin-missing' }
+    return { ok: false, reason: 'pharmacy-unavailable' }
+  }
 
   const addressSnapshot: QuoteAddressDto | null = address
     ? {
@@ -123,6 +183,7 @@ export async function buildCheckoutQuote(
         addressText: address.address_text,
         city: address.city,
         postalCode: address.postal_code,
+        rajaongkirDestinationId: Number(address.rajaongkir_destination_id),
       }
     : null
   const snapshot = buildQuoteSnapshot({
@@ -131,7 +192,7 @@ export async function buildCheckoutQuote(
     address: addressSnapshot,
     cart: input.items,
     stock: chosen.stock,
-    shippingFee: chosen.pharmacy.delivery_fee ?? process.env.DELIVERY_FEE_DEFAULT,
+    shippingFee: shippingSnapshot?.cost,
     serviceFee,
   })
   if (!snapshot) return { ok: false, reason: 'stock-changed' }
@@ -145,6 +206,7 @@ export async function buildCheckoutQuote(
     items: snapshot.items,
     totals: snapshot.totals,
     fingerprint: snapshot.fingerprint,
+    shippingSnapshot,
   })
   const hours = snapshot.needsPrescription
     ? await repository.listPrescriptionHours(chosen.pharmacy.id)
@@ -162,6 +224,7 @@ export async function buildCheckoutQuote(
       fulfillmentMethod: input.fulfillmentMethod,
       items: snapshot.items,
       totals: snapshot.totals,
+      shipping: shippingSnapshot,
       needsPrescription: snapshot.needsPrescription,
       prescriptionHours: hours.map((row) => ({
         weekday: row.weekday,
@@ -177,6 +240,7 @@ export async function requestCheckoutQuote(
   repository: CheckoutRepository,
   customerId: string,
   input: CreateQuoteRequestDto,
+  shipping: ShippingCalculator = defaultShippingCalculator,
 ) {
   const parsedItems = parseCartItems(input.items)
   if (!parsedItems.ok) {
@@ -196,12 +260,6 @@ export async function requestCheckoutQuote(
         : null
   if (!fulfillmentMethod)
     throw new ApplicationError(400, 'INVALID_FULFILLMENT', 'Pilih pengiriman atau ambil di apotek.')
-  if (fulfillmentMethod === 'delivery')
-    throw new ApplicationError(
-      422,
-      'SHIPPING_PROVIDER_NOT_CONFIGURED',
-      'Pengiriman belum tersedia sampai penyedia kurir dan tarif wilayah dikonfigurasi. Pilih ambil di apotek.',
-    )
   if (fulfillmentMethod === 'delivery' && !isUuid(String(input.addressId ?? '')))
     throw new ApplicationError(400, 'ADDRESS_REQUIRED', 'Pilih alamat pengiriman.')
 
@@ -210,9 +268,33 @@ export async function requestCheckoutQuote(
     addressId: input.addressId ?? null,
     fulfillmentMethod,
     items: parsedItems.items,
-  })
+  }, shipping)
   if (!result.ok && result.reason === 'address-not-found')
     throw new ApplicationError(404, 'ADDRESS_NOT_FOUND', 'Alamat tidak ditemukan.')
+  if (!result.ok && result.reason === 'address-destination-missing')
+    throw new ApplicationError(
+      422,
+      'ADDRESS_DESTINATION_REQUIRED',
+      'Pilih area tujuan dari pencarian RajaOngkir sebelum membuat quote pengiriman.',
+    )
+  if (!result.ok && result.reason === 'shipping-origin-missing')
+    throw new ApplicationError(
+      422,
+      'PHARMACY_SHIPPING_ORIGIN_NOT_CONFIGURED',
+      'Lokasi asal RajaOngkir untuk apotek ini belum diatur oleh admin.',
+    )
+  if (!result.ok && result.reason === 'shipping-weight-missing')
+    throw new ApplicationError(
+      422,
+      'PRODUCT_WEIGHT_NOT_CONFIGURED',
+      'Berat produk belum diatur atau total paket melewati batas. Minta admin memeriksa berat kemasan dalam gram.',
+    )
+  if (!result.ok && result.reason === 'shipping-unavailable')
+    throw new ApplicationError(
+      409,
+      'SHIPPING_UNAVAILABLE',
+      'Tidak ada layanan kurir untuk kombinasi apotek, alamat, dan berat ini.',
+    )
   if (!result.ok && result.reason === 'stock-changed')
     throw new ApplicationError(
       409,
@@ -230,7 +312,8 @@ export async function requestCheckoutQuote(
   return {
     ...result.quote,
     reservationMinutes: RESERVATION_MINUTES,
-    message: 'Harga dan ongkir akan diperiksa sekali lagi saat pesanan dibuat.',
+    message:
+      'Ongkir memakai tarif RajaOngkir saat quote dibuat dan berlaku sampai quote kedaluwarsa. Harga dan stok diperiksa sekali lagi saat pesanan dibuat.',
   }
 }
 

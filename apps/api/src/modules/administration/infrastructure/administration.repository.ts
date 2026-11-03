@@ -52,6 +52,7 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
         category: products.category,
         sell_unit: products.sellUnit,
         requires_prescription: products.requiresPrescription,
+        shipping_weight_grams: products.shippingWeightGrams,
         batch_tracking_required: products.batchTrackingRequired,
         status: products.status,
         indicative_price: sql<string>`COALESCE(MIN(${activeInventory.unitPrice}),0)`,
@@ -73,6 +74,7 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
         postal_codes: pharmacies.postalCodes,
         status: pharmacies.status,
         license_reference: pharmacies.licenseReference,
+        rajaongkir_origin_id: pharmacies.rajaongkirOriginId,
         created_at: pharmacies.createdAt,
       })
       .from(pharmacies)
@@ -143,18 +145,19 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
   async createProduct(
     actorId: string,
     input: CreateProductRequestDto,
-    values: { sku: string; name: string; category: string; sellUnit: string },
+    values: { sku: string; name: string; category: string; sellUnit: string; shippingWeightGrams: number },
   ) {
     return transaction(async (client) => {
       const result = await client.query(
-        `INSERT INTO products(sku,name,description,category,sell_unit,requires_prescription,batch_tracking_required,special_handling,status)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,'inactive') RETURNING id,sku,name,status`,
+        `INSERT INTO products(sku,name,description,category,sell_unit,shipping_weight_grams,requires_prescription,batch_tracking_required,special_handling,status)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'inactive') RETURNING id,sku,name,status`,
         [
           values.sku,
           values.name,
           String(input.description ?? '').slice(0, 3000),
           values.category,
           values.sellUnit,
+          values.shippingWeightGrams,
           input.requiresPrescription === true,
           input.batchTrackingRequired === true,
           input.specialHandling === true,
@@ -229,7 +232,7 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
       const result = await client.query(
         `UPDATE products SET name=COALESCE($2,name),description=COALESCE($3,description),category=COALESCE($4,category),
         sell_unit=COALESCE($5,sell_unit),requires_prescription=COALESCE($6,requires_prescription),batch_tracking_required=COALESCE($7,batch_tracking_required),special_handling=COALESCE($8,special_handling),
-        status=COALESCE($9,status),updated_at=now() WHERE id=$1 RETURNING id,sku,name,status`,
+        shipping_weight_grams=COALESCE($9,shipping_weight_grams),status=COALESCE($10,status),updated_at=now() WHERE id=$1 RETURNING id,sku,name,status,shipping_weight_grams`,
         [
           productId,
           input.name ?? null,
@@ -239,6 +242,7 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
           input.requiresPrescription ?? null,
           input.batchTrackingRequired ?? null,
           input.specialHandling ?? null,
+          input.shippingWeightGrams == null ? null : Number(input.shippingWeightGrams),
           input.status ?? null,
         ],
       )
@@ -251,8 +255,8 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
   async createPharmacy(actorId: string, input: CreatePharmacyRequestDto, values: PharmacyValues) {
     return transaction(async (client) => {
       const result = await client.query(
-        `INSERT INTO pharmacies(name,address_text,city,postal_codes,license_reference,status)
-        VALUES($1,$2,$3,$4,$5,'pending') RETURNING id,name,status`,
+        `INSERT INTO pharmacies(name,address_text,city,postal_codes,license_reference,rajaongkir_origin_id,status)
+        VALUES($1,$2,$3,$4,$5,$6,'pending') RETURNING id,name,status,rajaongkir_origin_id`,
         [
           values.name,
           values.address,
@@ -261,6 +265,7 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
           String(input.licenseReference ?? '')
             .trim()
             .slice(0, 160) || null,
+          values.rajaongkirOriginId,
         ],
       )
       await recordAudit(client, actorId, 'pharmacy.created', 'pharmacy', result.rows[0].id, {})
@@ -271,7 +276,8 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
   async updatePharmacy(
     actorId: string,
     pharmacyId: string,
-    status: string,
+    status: string | null,
+    originId?: number | null,
   ): Promise<AdministrationResult<unknown>> {
     return transaction(async (client) => {
       if (status === 'active') {
@@ -292,14 +298,32 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
         )
           return { ok: false, reason: 'onboarding-incomplete' }
       }
-      const result = await client.query(
-        'UPDATE pharmacies SET status=$2 WHERE id=$1 RETURNING id,name,status',
-        [pharmacyId, status],
-      )
+      let result
+      if (status !== null && originId !== undefined) {
+        result = await client.query(
+          'UPDATE pharmacies SET status=$2,rajaongkir_origin_id=$3 WHERE id=$1 RETURNING id,name,status,rajaongkir_origin_id',
+          [pharmacyId, status, originId],
+        )
+      } else if (status !== null) {
+        result = await client.query(
+          'UPDATE pharmacies SET status=$2 WHERE id=$1 RETURNING id,name,status,rajaongkir_origin_id',
+          [pharmacyId, status],
+        )
+      } else if (originId !== undefined) {
+        result = await client.query(
+          'UPDATE pharmacies SET rajaongkir_origin_id=$2 WHERE id=$1 RETURNING id,name,status,rajaongkir_origin_id',
+          [pharmacyId, originId],
+        )
+      } else {
+        return { ok: false, reason: 'not-found' }
+      }
       if (!result.rowCount) return { ok: false, reason: 'not-found' }
-      await recordAudit(client, actorId, 'pharmacy.status_changed', 'pharmacy', pharmacyId, {
-        status,
-      })
+      if (status !== null)
+        await recordAudit(client, actorId, 'pharmacy.status_changed', 'pharmacy', pharmacyId, { status })
+      if (originId !== undefined)
+        await recordAudit(client, actorId, 'pharmacy.shipping_origin_changed', 'pharmacy', pharmacyId, {
+          originId,
+        })
       return { ok: true, value: result.rows[0] }
     })
   }

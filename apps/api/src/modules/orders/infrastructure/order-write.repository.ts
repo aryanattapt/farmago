@@ -7,6 +7,7 @@ import { prescriptionServiceOpen } from '../../pharmacy'
 import { insertOrderStatusHistory } from './order-history.repository'
 import { OrderWriteError, type OrderWriteRepository } from '../application/create-order'
 import { generatePickupCode } from '../domain/pickup-code'
+import { packageWeightGrams, type ShippingSnapshot } from '../../shipping/public'
 
 export class PostgresOrderWriteRepository implements OrderWriteRepository {
   create(input: {
@@ -55,7 +56,7 @@ export class PostgresOrderWriteRepository implements OrderWriteRepository {
       const ids = itemSnapshots.map((item) => item.productId)
       const locked = await client.query(
         `SELECT p.id,p.name,p.category,p.sell_unit,p.requires_prescription,p.batch_tracking_required,p.status,p.special_handling,
-        i.on_hand,i.reserved,i.unit_price,i.sales_blocked FROM inventory i JOIN products p ON p.id=i.product_id
+        i.on_hand,i.reserved,i.unit_price,i.sales_blocked,p.shipping_weight_grams FROM inventory i JOIN products p ON p.id=i.product_id
         WHERE i.pharmacy_id=$1 AND p.id=ANY($2::uuid[]) ORDER BY p.id FOR UPDATE OF i`,
         [quote.pharmacy_id, ids],
       )
@@ -100,18 +101,36 @@ export class PostgresOrderWriteRepository implements OrderWriteRepository {
           addressText: address.address_text,
           city: address.city,
           postalCode: address.postal_code,
+          rajaongkirDestinationId: address.rajaongkir_destination_id,
         }
       }
       const pharmacyResult = await client.query(
-        "SELECT name,address_text,postal_codes,delivery_fee FROM pharmacies WHERE id=$1 AND status='active' FOR SHARE",
+        "SELECT name,address_text,postal_codes,delivery_fee,rajaongkir_origin_id FROM pharmacies WHERE id=$1 AND status='active' FOR SHARE",
         [quote.pharmacy_id],
       )
       if (!pharmacyResult.rowCount) throw new OrderWriteError('pharmacy-unavailable')
       const pharmacy = pharmacyResult.rows[0]
-      const shippingCents =
-        quote.fulfillment_method === 'delivery'
-          ? cents(pharmacy?.delivery_fee ?? process.env.DELIVERY_FEE_DEFAULT ?? 0)
-          : 0
+      const shippingSnapshot = quote.shipping_snapshot as ShippingSnapshot | null
+      let shippingCents = 0
+      if (quote.fulfillment_method === 'delivery') {
+        const currentWeight = packageWeightGrams(
+          updatedItems.map((item) => ({
+            quantity: Number(item.quantity),
+            shippingWeightGrams: Number(
+              locked.rows.find((row: any) => row.id === item.productId)?.shipping_weight_grams ?? 0,
+            ),
+          })),
+        )
+        if (
+          !shippingSnapshot ||
+          currentWeight == null ||
+          currentWeight !== shippingSnapshot.weightGrams ||
+          Number(currentAddress?.rajaongkirDestinationId) !== shippingSnapshot.destinationId ||
+          Number(pharmacy.rajaongkir_origin_id) !== shippingSnapshot.originId
+        )
+          throw new OrderWriteError('quote-changed')
+        shippingCents = cents(shippingSnapshot.cost)
+      }
       const subtotalCents = updatedItems.reduce((sum, item) => sum + cents(item.lineTotal), 0)
       const totals = {
         subtotal: money(subtotalCents),
@@ -130,6 +149,7 @@ export class PostgresOrderWriteRepository implements OrderWriteRepository {
       if (
         currentFingerprint !== quote.input_fingerprint ||
         (quote.fulfillment_method === 'delivery' &&
+          pharmacy.postal_codes.length > 0 &&
           !pharmacy.postal_codes.includes(currentAddress.postalCode))
       )
         throw new OrderWriteError('quote-changed')
@@ -142,8 +162,8 @@ export class PostgresOrderWriteRepository implements OrderWriteRepository {
       const hasPrescription = updatedItems.some((item) => item.requiresPrescription)
       const status = hasPrescription ? 'awaiting_prescription' : 'awaiting_payment'
       const inserted = await client.query(
-        `INSERT INTO orders(quote_id,customer_id,pharmacy_id,address_snapshot,fulfillment_method,status,pickup_code,subtotal,discount,shipping_fee,service_fee,total,expires_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,0,$9,$10,$11,now()+make_interval(mins=>$12::int)) RETURNING id,expires_at`,
+        `INSERT INTO orders(quote_id,customer_id,pharmacy_id,address_snapshot,fulfillment_method,status,pickup_code,subtotal,discount,shipping_fee,service_fee,total,shipping_snapshot,expires_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,0,$9,$10,$11,$12,now()+make_interval(mins=>$13::int)) RETURNING id,expires_at`,
         [
           input.quoteId,
           input.customerId,
@@ -156,6 +176,7 @@ export class PostgresOrderWriteRepository implements OrderWriteRepository {
           totals.shippingFee,
           totals.serviceFee,
           totals.total,
+          shippingSnapshot,
           RESERVATION_MINUTES,
         ],
       )
