@@ -16,10 +16,10 @@ import type {
   RegisterRequestDto,
 } from './application/auth.dto'
 import { PostgresIdentityRepository } from './infrastructure/auth.repository'
-import { ResendPasswordResetMailer } from './infrastructure/password-reset-email'
+import { SmtpPasswordResetMailer } from './infrastructure/password-reset-email'
 
 const repository = new PostgresIdentityRepository()
-const passwordResetMailer = new ResendPasswordResetMailer()
+const passwordResetMailer = new SmtpPasswordResetMailer()
 const mfa = {
   verify: (encryptedSecret: string, code: string) =>
     verifyTotp(decryptMfaSecret(encryptedSecret), code),

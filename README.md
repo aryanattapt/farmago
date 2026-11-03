@@ -39,7 +39,7 @@ Katalog dapat dijelajahi tanpa login. Untuk transaksi, daftar lalu gunakan tauta
 
 ## Email reset kata sandi
 
-Di production, tautan reset dikirim lewat Resend. Atur `RESEND_API_KEY` dan `EMAIL_FROM` pada `.env` lokal atau `.env.production`; `EMAIL_FROM` harus memakai alamat/domain pengirim yang sudah diverifikasi di Resend. Pastikan `WEB_ORIGIN` mengarah ke alamat web publik karena tautan kembali ke halaman web dengan parameter reset.
+Di production, tautan reset dikirim lewat SMTP. Isi `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, dan `EMAIL_FROM` pada `.env` atau `.env.production` sesuai pengaturan mail hosting/domain. Umumnya port 465 memakai `SMTP_SECURE=true` (TLS), sedangkan port 587 memakai `SMTP_SECURE=false` dengan STARTTLS. Jika relay SMTP mengizinkan koneksi tanpa autentikasi, `SMTP_USER` dan `SMTP_PASSWORD` boleh dikosongkan. Pastikan `EMAIL_FROM` diizinkan oleh server SMTP, domain pengirim memiliki konfigurasi SPF/DKIM dari provider email, dan `WEB_ORIGIN` mengarah ke alamat web publik.
 
 API tetap mengembalikan pesan generik dan tidak menyertakan tautan reset di production. Di development, API menyertakan `resetUrl` agar alur bisa diuji manual. Token berlaku 30 menit. Akun harus memiliki email terdaftar; reset untuk akun yang hanya memiliki nomor telepon memerlukan adapter SMS terpisah.
 
