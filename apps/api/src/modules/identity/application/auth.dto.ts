@@ -9,6 +9,10 @@ export type ContactVerificationRequestDto = {
   token?: string
 }
 
+export type ContactVerificationResendRequestDto = {
+  contact?: string
+}
+
 export type PasswordResetRequestDto = {
   token?: string
   newPassword?: string

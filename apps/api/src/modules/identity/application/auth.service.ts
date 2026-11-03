@@ -3,6 +3,7 @@ import { ApplicationError } from '../../../shared/application-error'
 import { hash } from '../../../shared/security/hash'
 import type {
   ContactVerificationRequestDto,
+  ContactVerificationResendRequestDto,
   LoginRequestDto,
   PasswordResetRequestDto,
   RegisterRequestDto,
@@ -29,7 +30,9 @@ export interface IdentityRepository {
     email: string | null,
     phone: string | null,
     passwordHash: string,
+    options?: { returnUrlInProduction?: boolean },
   ): Promise<{ verificationUrl: string | null }>
+  findUnverifiedEmailAccount(email: string): Promise<{ id: string; email: string } | null>
   verifyContact(tokenHash: string): Promise<boolean>
   resetPassword(tokenHash: string, passwordHash: string): Promise<boolean>
   findPasswordResetAccount(contact: string): Promise<{ id: string; email: string | null } | null>
@@ -46,8 +49,9 @@ export interface IdentityRepository {
   findUserForSessionToken(token: string | null): Promise<User | null>
 }
 
-export interface PasswordResetMailer {
+export interface IdentityMailer {
   isConfigured(): boolean
+  sendContactVerificationEmail(to: string, verificationUrl: string): Promise<void>
   sendPasswordResetEmail(to: string, resetUrl: string): Promise<void>
 }
 
@@ -55,7 +59,11 @@ export interface MfaVerifier {
   verify(encryptedSecret: string, code: string): boolean
 }
 
-export async function registerIdentity(repository: IdentityRepository, input: RegisterRequestDto) {
+export async function registerIdentity(
+  repository: IdentityRepository,
+  mailer: IdentityMailer,
+  input: RegisterRequestDto,
+) {
   const name = String(input.name ?? '').trim()
   const email = input.email ? String(input.email).trim().toLowerCase() : null
   const phone = input.phone ? String(input.phone).trim() : null
@@ -74,7 +82,58 @@ export async function registerIdentity(repository: IdentityRepository, input: Re
     )
   if (password.length < 12 || password.length > 128)
     throw new ApplicationError(400, 'WEAK_PASSWORD', 'Kata sandi harus berisi 12–128 karakter.')
-  return repository.register(name, email, phone, await Bun.password.hash(password))
+
+  const isProduction = process.env.NODE_ENV === 'production'
+  if (isProduction && !email)
+    throw new ApplicationError(
+      503,
+      'SMS_PROVIDER_NOT_CONFIGURED',
+      'Pendaftaran dengan nomor telepon belum tersedia. Daftar menggunakan email.',
+    )
+  if (isProduction && !mailer.isConfigured())
+    throw new ApplicationError(
+      503,
+      'EMAIL_PROVIDER_NOT_CONFIGURED',
+      'Pengiriman email verifikasi belum dikonfigurasi.',
+    )
+
+  const created = await repository.register(
+    name,
+    email,
+    phone,
+    await Bun.password.hash(password),
+    { returnUrlInProduction: isProduction },
+  )
+
+  if (!isProduction)
+    return {
+      ...created,
+      message: 'Akun dibuat. Verifikasi kontak sebelum transaksi.',
+      canResendVerification: false,
+    }
+
+  let emailSent = false
+  if (email && created.verificationUrl) {
+    try {
+      await mailer.sendContactVerificationEmail(email, created.verificationUrl)
+      emailSent = true
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: 'auth.contact_verification_email_failed',
+          error: error instanceof Error ? error.message : 'unknown',
+        }),
+      )
+    }
+  }
+
+  return {
+    verificationUrl: null,
+    message: emailSent
+      ? 'Akun dibuat. Periksa email untuk memverifikasi akun sebelum bertransaksi.'
+      : 'Akun dibuat, tetapi email verifikasi belum terkirim. Minta pengiriman ulang email verifikasi.',
+    canResendVerification: Boolean(email),
+  }
 }
 
 export async function verifyIdentityContact(
@@ -96,9 +155,54 @@ export async function verifyIdentityContact(
     )
 }
 
+export async function resendIdentityContactVerification(
+  repository: IdentityRepository,
+  mailer: IdentityMailer,
+  input: ContactVerificationResendRequestDto,
+) {
+  const contact = String(input.contact ?? '').trim().toLowerCase()
+  const genericMessage =
+    'Jika email terkait akun yang belum terverifikasi, tautan verifikasi akan dikirim.'
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact))
+    return { message: genericMessage, verificationUrl: null }
+
+  const isProduction = process.env.NODE_ENV === 'production'
+  if (isProduction && !mailer.isConfigured())
+    throw new ApplicationError(
+      503,
+      'EMAIL_PROVIDER_NOT_CONFIGURED',
+      'Pengiriman email verifikasi belum dikonfigurasi.',
+    )
+
+  const account = await repository.findUnverifiedEmailAccount(contact)
+  if (!account) return { message: genericMessage, verificationUrl: null }
+
+  const verificationUrl = await repository.issueToken(
+    account.id,
+    'verify_email',
+    account.email,
+    { returnUrlInProduction: isProduction },
+  )
+  if (isProduction && verificationUrl) {
+    try {
+      await mailer.sendContactVerificationEmail(account.email, verificationUrl)
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: 'auth.contact_verification_email_failed',
+          error: error instanceof Error ? error.message : 'unknown',
+        }),
+      )
+    }
+    return { message: genericMessage, verificationUrl: null }
+  }
+  return { message: genericMessage, verificationUrl }
+}
+
 export async function resetIdentityPassword(
   repository: IdentityRepository,
-  mailer: PasswordResetMailer,
+  mailer: IdentityMailer,
   input: PasswordResetRequestDto,
 ) {
   if (input.token && input.newPassword) {

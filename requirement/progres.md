@@ -1,6 +1,6 @@
 # Progres Implementasi FarmaGO
 
-**Pembaruan:** 2 November 2026  
+**Pembaruan:** 3 November 2026  
 **Status umum:** Implementasi awal tersedia; belum siap untuk pilot atau produksi.
 
 Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sudah melewati UAT atau validasi operasional.
@@ -19,7 +19,7 @@ Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sud
 - Suite integration API berbasis PostgreSQL ditambahkan untuk reservasi/idempotensi stok, race pada stok terakhir, perubahan harga quote, otorisasi dan konkurensi review resep, serta pemenuhan pickup; CI menyiapkan database khusus dan menjalankan migrasi.
 - Bucket rate limit yang kedaluwarsa dibersihkan berkala agar memori API tidak terus tumbuh.
 - Temuan review awal diperbaiki: klasifikasi dan aktivasi katalog dibatasi ke apoteker; order mengunci status apotek saat dibuat; referensi bukti pickup tersimpan lewat migrasi; file resep dibersihkan jika transaksi gagal.
-- Registrasi, verifikasi kontak, reset kata sandi, dan mutasi operasional/audit berjalan dalam transaksi; login membatasi kata sandi maksimum 128 karakter.
+- Registrasi dan verifikasi kontak berjalan dalam transaksi; email verifikasi pendaftaran serta reset kata sandi production dikirim lewat SMTP. Login membatasi kata sandi maksimum 128 karakter.
 - Validasi jam layanan menolak jam, tanggal, timezone, dan jadwal ganda yang tidak valid; seed menolak environment production.
 - Alur alamat pengiriman baru memakai alamat hasil simpan; panel katalog apoteker menampilkan kontrol buat dan aktivasi produk.
 - README menjelaskan cara menjalankan aplikasi dan batas kesiapan integrasi.
@@ -28,7 +28,7 @@ Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sud
 
 | Kebutuhan | Status | Catatan |
 |---|---|---|
-| PR-01 Akun dan sesi | Sebagian | Alur akun dan verifikasi tersedia untuk development; pengiriman verifikasi dan pemulihan akses produksi belum terhubung. |
+| PR-01 Akun dan sesi | Sebagian | Email verifikasi pendaftaran dan reset kata sandi production dikirim lewat SMTP; pengiriman ulang verifikasi tersedia. SMS belum terhubung sehingga pendaftaran dengan nomor telepon saja dinonaktifkan di production. |
 | PR-02 Alamat dan pengambilan | Sebagian | Alamat dan pengambilan tersedia; pengiriman belum aktif. |
 | PR-03 Katalog | Dikerjakan | Katalog, pencarian, kategori, harga indikatif, dan penanda resep tersedia. |
 | PR-04 Keranjang dan pemeriksaan ulang | Dikerjakan | Harga/stok diperiksa kembali; perubahan quote memerlukan persetujuan ulang. |
@@ -44,7 +44,7 @@ Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sud
 ## Belum dikerjakan atau masih menunggu keputusan
 
 - Pilih serta integrasikan penyedia pembayaran dan kurir, tarif pengiriman, webhook, rekonsiliasi, dan refund.
-- Hubungkan layanan produksi untuk email/SMS, verifikasi kontak, dan pemulihan akun.
+- Hubungkan SMS untuk verifikasi nomor telepon dan pemulihan akun; validasi deliverability SMTP di production.
 - Pindahkan berkas resep ke object storage privat dan tambahkan pemindaian malware.
 - Sahkan kebijakan refund, ongkir/biaya, retensi, izin, peran pemrosesan data, SOP resep, kategori produk, dan prosedur pilot.
 - Tentukan apotek/wilayah pilot dan buktikan pemisahan stok daring dari stok kasir atau siapkan integrasi POS.

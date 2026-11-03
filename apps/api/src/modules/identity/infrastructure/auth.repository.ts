@@ -12,7 +12,13 @@ import { createSession, findUserForSessionToken, issueToken } from './session.re
 import type { IdentityRepository, LoginAccount, LoginRole } from '../application/auth.service'
 
 export class PostgresIdentityRepository implements IdentityRepository {
-  async register(name: string, email: string | null, phone: string | null, passwordHash: string) {
+  async register(
+    name: string,
+    email: string | null,
+    phone: string | null,
+    passwordHash: string,
+    options?: { returnUrlInProduction?: boolean },
+  ) {
     const target = email ?? phone
     return transaction(async (client) => {
       const result = await client.query(
@@ -27,9 +33,19 @@ export class PostgresIdentityRepository implements IdentityRepository {
         email ? 'verify_email' : 'verify_phone',
         target,
         client,
+        options,
       )
       return { verificationUrl }
     })
+  }
+
+  async findUnverifiedEmailAccount(email: string) {
+    const [user] = await db
+      .select({ id: users.id, email: users.email })
+      .from(users)
+      .where(and(sql`lower(${users.email}) = lower(${email})`, isNull(users.emailVerifiedAt)))
+      .limit(1)
+    return user?.email ? { id: user.id, email: user.email } : null
   }
 
   async verifyContact(tokenHash: string) {
