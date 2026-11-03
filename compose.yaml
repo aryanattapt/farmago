@@ -25,6 +25,8 @@ services:
       API_PORT: "4000"
       WEB_ORIGIN: http://localhost:8080
       MFA_ENCRYPTION_KEY: "${MFA_ENCRYPTION_KEY:-}"
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      EMAIL_FROM: "${EMAIL_FROM:-}"
     command: ["sh", "-c", "bun apps/api/src/migrate.ts && exec bun apps/api/src/server.ts"]
     depends_on:
       db:
