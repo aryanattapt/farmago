@@ -7,7 +7,7 @@ import { prescriptionServiceOpen } from '../../pharmacy'
 import { insertOrderStatusHistory } from './order-history.repository'
 import { OrderWriteError, type OrderWriteRepository } from '../application/create-order'
 import { generatePickupCode } from '../domain/pickup-code'
-import { packageWeightGrams, type ShippingSnapshot } from '../../shipping/public'
+import { packageWeightGrams, type ShippingSnapshot } from '../../shipping'
 
 export class PostgresOrderWriteRepository implements OrderWriteRepository {
   create(input: {

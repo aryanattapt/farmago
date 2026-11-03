@@ -1,6 +1,6 @@
 import { amount } from '../../../shared/domain/money'
 import { ApplicationError } from '../../../shared/application-error'
-import { publicProduct } from '../../catalog'
+import { publicProduct } from '../../../shared/domain/product-view'
 import type {
   ConfigureInventoryRequestDto,
   CreatePharmacyRequestDto,

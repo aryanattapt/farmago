@@ -1,6 +1,6 @@
 import type { AddressInputDto } from './address.dto'
 import { ApplicationError } from '../../../shared/application-error'
-import { searchShippingDestinations } from '../../shipping/public'
+import { searchShippingDestinations } from '../../shipping'
 
 export interface AddressRepository {
   listForUser(userId: string): Promise<unknown[]>

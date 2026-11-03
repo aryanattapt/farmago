@@ -12,7 +12,7 @@ import {
   calculateLowestShippingOption,
   packageWeightGrams,
   type ShippingSnapshot,
-} from '../../shipping/public'
+} from '../../shipping'
 
 type AddressRow = {
   id: string
