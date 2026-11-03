@@ -1,6 +1,6 @@
 import type { User } from '../../../shared/domain/access'
 import { ApplicationError } from '../../../shared/application-error'
-import type { FulfillmentCheckRequestDto, FulfillmentCommandRequestDto } from './fulfillment.dto'
+import type { FulfillmentCheckRequestDto, FulfillmentCommandRequestDto, KomerceDeliveryWebhookDto } from './fulfillment.dto'
 
 export class FulfillmentOperationError extends ApplicationError {}
 
@@ -14,6 +14,7 @@ export interface FulfillmentRepository {
   createShipmentBooking(orderId: string, actor: User): Promise<unknown>
   requestShipmentPickup(orderId: string, actor: User, input: { pickupDate?: unknown; pickupTime?: unknown; pickupVehicle?: unknown }): Promise<unknown>
   getShipmentTracking(orderId: string, customerId: string): Promise<unknown>
+  receiveKomerceWebhook(input: KomerceDeliveryWebhookDto): Promise<unknown>
   getShipmentLabel(orderId: string, actor: User): Promise<{ base64: string }>
 }
 
@@ -62,4 +63,11 @@ export function getShipmentLabel(
 
 export function getShipmentTracking(repository: FulfillmentRepository, orderId: string, customerId: string) {
   return repository.getShipmentTracking(orderId, customerId)
+}
+
+export function receiveKomerceShipmentWebhook(
+  repository: FulfillmentRepository,
+  input: KomerceDeliveryWebhookDto,
+) {
+  return repository.receiveKomerceWebhook(input)
 }

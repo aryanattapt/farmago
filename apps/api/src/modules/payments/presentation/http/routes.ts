@@ -26,9 +26,5 @@ export async function handlePaymentRoutes({
     const input = await body<RefundRequestDto>(request)
     await submitPaymentRefund(refundMatch[1], input)
   }
-  const shippingWebhook = path.match(/^\/webhooks\/shipping\/([a-z0-9_-]+)$/i)
-  if (shippingWebhook && method === 'POST')
-    apiError(503, 'SHIPPING_PROVIDER_NOT_CONFIGURED', 'Adapter pengiriman belum dikonfigurasi.')
-
   return null
 }

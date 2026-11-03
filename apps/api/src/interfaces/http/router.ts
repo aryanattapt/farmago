@@ -21,7 +21,7 @@ import { handleCheckoutRoutes } from '../../modules/checkout'
 import { handleOrderRoutes } from '../../modules/orders'
 import { handlePrescriptionRoutes } from '../../modules/prescriptions'
 import { handlePaymentRoutes } from '../../modules/payments'
-import { handleFulfillmentRoutes } from '../../modules/fulfillment'
+import { handleFulfillmentRoutes, handleKomerceShippingWebhookRoutes } from '../../modules/fulfillment'
 import { handleSupportRoutes } from '../../modules/support'
 import { handleAdminRoutes } from '../../modules/administration'
 import { handlePharmacyRoutes } from '../../modules/pharmacy'
@@ -198,7 +198,7 @@ export function createApiApp() {
     { method: 'GET', path: '/products', handler: createPublicEndpoint(handleCatalogRoutes) },
     { method: 'GET', path: '/products/:productId', handler: createPublicEndpoint(handleCatalogRoutes) },
     { method: 'POST', path: '/webhooks/payment/:provider', handler: createPublicEndpoint(handleCatalogRoutes) },
-    { method: 'POST', path: '/webhooks/shipping/:provider', handler: createPublicEndpoint(handleCatalogRoutes) },
+    { method: 'POST', path: '/webhooks/shipping/:provider', handler: createPublicEndpoint(handleKomerceShippingWebhookRoutes) },
 
     { method: 'GET', path: '/auth/session', handler: createPublicEndpoint(handleAuthRoutes) },
     { method: 'POST', path: '/auth/register', handler: createPublicEndpoint(handleAuthRoutes) },

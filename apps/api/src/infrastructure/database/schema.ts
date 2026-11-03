@@ -358,6 +358,7 @@ export const shipments = pgTable('shipments', {
   pickupVehicle: text('pickup_vehicle'),
   createdAt: createdAt(),
   handoverReference: text('handover_reference'),
+  handedOverAt: timestamp('handed_over_at', { withTimezone: true }),
 })
 
 export const shipmentAttempts = pgTable('shipment_attempts', {

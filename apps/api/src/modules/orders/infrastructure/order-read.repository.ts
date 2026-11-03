@@ -148,6 +148,8 @@ export class PostgresOrderReadRepository implements OrderListRepository {
           pickup_date: shipments.pickupDate,
           pickup_time: shipments.pickupTime,
           pickup_vehicle: shipments.pickupVehicle,
+          handover_reference: shipments.handoverReference,
+          handed_over_at: shipments.handedOverAt,
         })
         .from(shipments)
         .where(eq(shipments.orderId, orderId))
