@@ -3,7 +3,7 @@ import { ApplicationError } from '../../../shared/application-error'
 export type RajaOngkirConfig = {
   apiKey: string
   baseUrl: string
-  couriers: string[]
+  couriers?: string[]
 }
 
 export type RajaOngkirDestination = {
@@ -60,17 +60,37 @@ export class RajaOngkirClient {
     })
   }
 
-  async calculateDomesticCost(input: {
-    originId: number
-    destinationId: number
-    weightGrams: number
-  }): Promise<RajaOngkirRate[]> {
+  async calculateDomesticCost(
+    input: {
+      originId: number
+      destinationId: number
+      weightGrams: number
+    },
+    activeCouriers?: string[],
+  ): Promise<RajaOngkirRate[]> {
     const config = this.requireConfig()
+    const couriers = [
+      ...new Set((activeCouriers ?? config.couriers ?? [])
+        .map((code) => code.trim().toLowerCase())
+        .filter(Boolean)),
+    ]
+    if (!couriers.length)
+      throw new ApplicationError(
+        503,
+        'SHIPPING_COURIERS_NOT_CONFIGURED',
+        'Belum ada kurir aktif di tabel rajaongkir_couriers.',
+      )
+    if (couriers.some((code) => !/^[a-z0-9_-]{2,30}$/.test(code)))
+      throw new ApplicationError(
+        500,
+        'SHIPPING_CONFIG_INVALID',
+        'Kode kurir pada tabel rajaongkir_couriers tidak valid.',
+      )
     const body = new URLSearchParams({
       origin: String(input.originId),
       destination: String(input.destinationId),
       weight: String(input.weightGrams),
-      courier: config.couriers.join(':'),
+      courier: couriers.join(':'),
       price: 'lowest',
     })
     const url = new URL('calculate/domestic-cost', ensureTrailingSlash(config.baseUrl))
@@ -138,20 +158,9 @@ export class RajaOngkirClient {
 export function loadRajaOngkirConfig(env: NodeJS.ProcessEnv = process.env): RajaOngkirConfig | null {
   const apiKey = String(env.RAJAONGKIR_API_KEY ?? '').trim()
   if (!apiKey) return null
-  const couriers = String(env.RAJAONGKIR_COURIERS ?? 'jne')
-    .split(':')
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean)
-  if (!couriers.length || couriers.some((code) => !/^[a-z0-9_-]{2,30}$/.test(code)))
-    throw new ApplicationError(
-      500,
-      'SHIPPING_CONFIG_INVALID',
-      'RAJAONGKIR_COURIERS harus berisi kode kurir yang valid.',
-    )
   return {
     apiKey,
     baseUrl: String(env.RAJAONGKIR_BASE_URL ?? 'https://rajaongkir.komerce.id/api/v1').replace(/\/$/, ''),
-    couriers,
   }
 }
 

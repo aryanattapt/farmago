@@ -113,6 +113,13 @@ export const pharmacyServiceExceptions = pgTable('pharmacy_service_exceptions', 
   reason: text('reason'),
 })
 
+export const rajaongkirCouriers = pgTable('rajaongkir_couriers', {
+  courierCode: text('courier_code').primaryKey(),
+  enabled: boolean('enabled').notNull().default(true),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: createdAt(),
+})
+
 export const addresses = pgTable('addresses', {
   id: id(),
   userId: uuid('user_id').notNull(),

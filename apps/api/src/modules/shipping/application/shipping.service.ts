@@ -1,5 +1,6 @@
 import { ApplicationError } from '../../../shared/application-error'
 import { RajaOngkirClient, type RajaOngkirRate } from '../infrastructure/rajaongkir.client'
+import { listActiveRajaOngkirCourierCodes } from '../infrastructure/rajaongkir-courier.repository'
 
 export type ShippingOption = {
   provider: 'RajaOngkir'
@@ -43,7 +44,8 @@ export async function calculateShippingOptions(input: {
       !Number.isSafeInteger(input.destinationId) || input.destinationId <= 0 ||
       !Number.isSafeInteger(input.weightGrams) || input.weightGrams <= 0 || input.weightGrams > MAX_PARCEL_WEIGHT_GRAMS)
     throw new ApplicationError(422, 'INVALID_SHIPPING_REQUEST', 'Lokasi dan berat paket tidak valid untuk menghitung ongkir.')
-  const rates = await getClient().calculateDomesticCost(input)
+  const courierCodes = await listActiveRajaOngkirCourierCodes()
+  const rates = await getClient().calculateDomesticCost(input, courierCodes)
   return [...rates]
     .sort(compareRates)
     .map((rate) => toShippingSnapshot(rate, input.originId, input.destinationId, input.weightGrams))

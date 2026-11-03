@@ -31,6 +31,9 @@ services:
       SMTP_USER: "${SMTP_USER:-}"
       SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
       EMAIL_FROM: "${EMAIL_FROM:-}"
+      RAJAONGKIR_API_KEY: "${RAJAONGKIR_API_KEY:-}"
+      RAJAONGKIR_BASE_URL: "${RAJAONGKIR_BASE_URL:-https://rajaongkir.komerce.id/api/v1}"
+      RAJAONGKIR_PACKAGING_WEIGHT_GRAMS: "${RAJAONGKIR_PACKAGING_WEIGHT_GRAMS:-250}"
     command: ["sh", "-c", "bun apps/api/src/migrate.ts && exec bun apps/api/src/server.ts"]
     depends_on:
       db:
