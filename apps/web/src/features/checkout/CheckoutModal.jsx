@@ -12,7 +12,9 @@ export function CheckoutModal({ cart, user, csrf, onClose, onOrder, onAuth, onTo
   const [destination,setDestination]=useState(null)
   const [address,setAddress]=useState({recipientName:user?.name||'',phone:user?.phone||'',addressText:'',city:'Jakarta Selatan',postalCode:''})
   const [quote,setQuote]=useState(null)
+  const [quoteAddressId,setQuoteAddressId]=useState('')
   const [loading,setLoading]=useState(false)
+  const [loadingAction,setLoadingAction]=useState('')
   const [error,setError]=useState('')
   const [accepted,setAccepted]=useState(false)
   useEffect(()=>{if(user) api('/addresses').then((r)=>{setAddresses(r.items);const first=r.items.find((item)=>item.rajaongkirDestinationId);if(first)setAddressId(first.id)}).catch(()=>{})},[user?.id])
@@ -23,23 +25,38 @@ export function CheckoutModal({ cart, user, csrf, onClose, onOrder, onAuth, onTo
     const result=await api('/addresses',{method:'POST',csrf,body:JSON.stringify({...address,city:destination.cityName,postalCode:destination.zipCode,rajaongkirDestinationId:destination.id,rajaongkirDestinationLabel:destination.label})})
     setAddresses((old)=>[result,...old]);setAddressId(result.id);setNewAddress(false);return result.id
   }
+  const postQuote=(selectedAddressId,shippingSelection)=>{
+    const payload={items:cart.map((i)=>({productId:i.id,quantity:i.quantity})),fulfillmentMethod:method,addressId:method==='delivery'?selectedAddressId:undefined}
+    if(shippingSelection) payload.shippingSelection=shippingSelection
+    return api('/checkout/quote',{method:'POST',csrf,body:JSON.stringify(payload)})
+  }
   const createQuote=async(e)=>{
-    e.preventDefault();setLoading(true);setError('')
+    e.preventDefault();setLoading(true);setLoadingAction('quote');setError('')
     try{
       let selected=addressId
       if(method==='delivery'&&(newAddress||!deliveryAddresses.length)) selected=await saveAddress()
       if(method==='delivery'&&!selected) throw new Error('Pilih alamat pengiriman.')
       if(method==='delivery'&&!newAddress&&deliveryAddresses.length>0&&!deliveryAddresses.some((item)=>item.id===selected)) throw new Error('Pilih alamat pengiriman yang memiliki area tujuan RajaOngkir.')
-      const result=await api('/checkout/quote',{method:'POST',csrf,body:JSON.stringify({items:cart.map((i)=>({productId:i.id,quantity:i.quantity})),fulfillmentMethod:method,addressId:method==='delivery'?selected:undefined})})
+      const result=await postQuote(selected)
+      setQuoteAddressId(method==='delivery'?selected:'')
       setQuote(result);setAccepted(false)
-    }catch(err){setError(err.message)}finally{setLoading(false)}
+    }catch(err){setError(err.message)}finally{setLoading(false);setLoadingAction('')}
+  }
+  const selectShippingOption=async(option)=>{
+    if(!quote||loading) return
+    if(quote.shipping?.courierCode===option.courierCode&&quote.shipping?.service===option.service) return
+    setLoading(true);setLoadingAction('shipping');setError('')
+    try{
+      const result=await postQuote(quoteAddressId,{courierCode:option.courierCode,service:option.service})
+      setQuote(result);setAccepted(false)
+    }catch(err){setError(err.message)}finally{setLoading(false);setLoadingAction('')}
   }
   const createOrder=async()=>{
-    setLoading(true);setError('')
+    setLoading(true);setLoadingAction('order');setError('')
     try{
       const result=await api('/orders',{method:'POST',csrf,headers:{'Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({quoteId:quote.quoteId})})
       onOrder(result)
-    }catch(err){setError(err.message);if(err.code==='QUOTE_CHANGED'||err.code==='STOCK_UNAVAILABLE'){setQuote(null);setAccepted(false)}}finally{setLoading(false)}
+    }catch(err){setError(err.message);if(err.code==='QUOTE_CHANGED'||err.code==='STOCK_UNAVAILABLE'){setQuote(null);setAccepted(false)}}finally{setLoading(false);setLoadingAction('')}
   }
   const prescription=cart.some((item)=>item.requiresPrescription)
   const change=(key,value)=>setAddress((old)=>({...old,[key]:value}))
@@ -49,6 +66,6 @@ export function CheckoutModal({ cart, user, csrf, onClose, onOrder, onAuth, onTo
       {prescription&&<div className="notice notice-purple"><FileHeart size={18}/><span>Keranjang berisi produk resep. Apoteker akan memeriksa dokumen sebelum pembayaran tersedia.</span></div>}
       <div className="checkout-items"><div className="checkout-items-head"><strong>Ringkasan belanja</strong><span>{cart.reduce((s,i)=>s+i.quantity,0)} produk</span></div>{cart.map((item)=><div className="checkout-item" key={item.id}><span>{item.name} <small>× {item.quantity}</small>{item.requiresPrescription&&<em>Resep</em>}</span><b>{money(Number(item.indicativePrice)*item.quantity)}</b></div>)}</div>
       {error&&<div className="form-error">{error}</div>}<button className="button button-dark full-width" disabled={loading||!user?.contactVerified||!cart.length}>{loading?'Memeriksa apotek...':method==='delivery'?'Lihat rincian ongkir':'Lihat rincian biaya'} <ArrowRight size={17}/></button><p className="fine-print">Belum ada stok yang direservasi. Rincian harga akhir perlu kamu setujui.</p>
-    </form>:<div className="checkout-body quote-review"><div className="pharmacy-card"><span className="pharmacy-pin"><MapPin size={17}/></span><div><small>APOTEK YANG MEMENUHI PESANAN</small><strong>{quote.pharmacy.name}</strong><span>{quote.pharmacy.address}</span></div><BadgeCheck size={18} className="verified-icon"/></div>{quote.shipping&&<div className="shipping-quote"><Truck size={18}/><span><strong>{quote.shipping.courierName} · {quote.shipping.service}</strong><small>{quote.shipping.description}{quote.shipping.etd?' · Estimasi '+quote.shipping.etd:''}</small></span></div>}<div className="cost-breakdown">{[['Subtotal',quote.totals.subtotal],['Diskon','0.00'],['Ongkos kirim',quote.totals.shippingFee],['Biaya layanan',quote.totals.serviceFee]].map(([label,value])=><div key={label}><span>{label}</span><b>{money(value)}</b></div>)}<div className="cost-total"><strong>Total</strong><strong>{money(quote.totals.total)}</strong></div></div>{quote.needsPrescription&&<div className="notice notice-purple"><Clock3 size={18}/><span>Jam pemeriksaan resep: {quote.prescriptionHours.map((h)=>`${['Min','Sen','Sel','Rab','Kam','Jum','Sab'][h.weekday]} ${h.opensAt.slice(0,5)}–${h.closesAt.slice(0,5)}`).join(' · ')} ({quote.prescriptionHours[0]?.timezone}). Reservasi berlangsung {quote.reservationMinutes} menit.</span></div>}<label className="consent-row"><input type="checkbox" checked={accepted} onChange={(e)=>setAccepted(e.target.checked)}/><span>Saya telah meninjau harga dan biaya. Saya memahami bahwa jumlah akan direservasi selama {quote.reservationMinutes} menit setelah pesanan dibuat.</span></label>{error&&<div className="form-error">{error}</div>}<button className="button button-dark full-width" disabled={!accepted||loading} onClick={createOrder}>{loading?'Membuat pesanan...':'Buat pesanan'} <ArrowRight size={17}/></button><button className="button button-quiet full-width" onClick={()=>{setQuote(null);setError('')}}>Kembali ubah pemenuhan</button><p className="fine-print">Quote berlaku sampai {new Date(quote.expiresAt).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'})}. Harga dan stok diperiksa lagi saat pesanan dibuat.</p></div>}
+    </form>:<div className="checkout-body quote-review"><div className="pharmacy-card"><span className="pharmacy-pin"><MapPin size={17}/></span><div><small>APOTEK YANG MEMENUHI PESANAN</small><strong>{quote.pharmacy.name}</strong><span>{quote.pharmacy.address}</span></div><BadgeCheck size={18} className="verified-icon"/></div>{quote.shippingOptions?.length>0&&<fieldset className="shipping-options"><legend>Pilih kurir dan layanan</legend>{quote.shippingOptions.map((option)=>{const selected=quote.shipping?.courierCode===option.courierCode&&quote.shipping?.service===option.service;return <label key={option.courierCode+'-'+option.service} className={selected?'shipping-option selected':'shipping-option'}><input type="radio" name="shipping-option" checked={selected} disabled={loading} onChange={()=>selectShippingOption(option)}/><span><strong>{option.courierName} · {option.service}</strong><small>{option.description}{option.etd?' · Estimasi '+option.etd:''}</small></span><b>{money(option.cost)}</b></label>})}</fieldset>}<div className="cost-breakdown">{[['Subtotal',quote.totals.subtotal],['Diskon','0.00'],['Ongkos kirim',quote.totals.shippingFee],['Biaya layanan',quote.totals.serviceFee]].map(([label,value])=><div key={label}><span>{label}</span><b>{money(value)}</b></div>)}<div className="cost-total"><strong>Total</strong><strong>{money(quote.totals.total)}</strong></div></div>{quote.needsPrescription&&<div className="notice notice-purple"><Clock3 size={18}/><span>Jam pemeriksaan resep: {quote.prescriptionHours.map((h)=>`${['Min','Sen','Sel','Rab','Kam','Jum','Sab'][h.weekday]} ${h.opensAt.slice(0,5)}–${h.closesAt.slice(0,5)}`).join(' · ')} ({quote.prescriptionHours[0]?.timezone}). Reservasi berlangsung {quote.reservationMinutes} menit.</span></div>}<label className="consent-row"><input type="checkbox" checked={accepted} onChange={(e)=>setAccepted(e.target.checked)}/><span>Saya telah meninjau harga dan biaya. Saya memahami bahwa jumlah akan direservasi selama {quote.reservationMinutes} menit setelah pesanan dibuat.</span></label>{error&&<div className="form-error">{error}</div>}<button className="button button-dark full-width" disabled={!accepted||loading} onClick={createOrder}>{loading?(loadingAction==='shipping'?'Memperbarui ongkir...':'Membuat pesanan...'):'Buat pesanan'} <ArrowRight size={17}/></button><button className="button button-quiet full-width" onClick={()=>{setQuote(null);setError('')}}>Kembali ubah pemenuhan</button><p className="fine-print">Quote berlaku sampai {new Date(quote.expiresAt).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'})}. Harga dan stok diperiksa lagi saat pesanan dibuat.</p></div>}
   </section></div>
 }
