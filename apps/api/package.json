@@ -13,7 +13,11 @@
     "test:integration": "bun test test/integration"
   },
   "dependencies": {
+    "@sinclair/typebox": "0.34.52",
     "drizzle-orm": "^0.45.4",
+    "elysia": "1.4.30",
+    "file-type": "22.3.0",
+    "openapi-types": "12.1.3",
     "pg": "^8.16.3"
   },
   "devDependencies": {
