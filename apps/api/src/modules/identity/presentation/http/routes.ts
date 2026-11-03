@@ -4,11 +4,13 @@ import {
   loginIdentityAccount,
   logoutIdentitySession,
   registerIdentityAccount,
+  resendIdentityAccountContactVerification,
   resetIdentityAccountPassword,
   verifyIdentityAccountContact,
 } from '../../public'
 import type {
   ContactVerificationRequestDto,
+  ContactVerificationResendRequestDto,
   LoginRequestDto,
   PasswordResetRequestDto,
   RegisterRequestDto,
@@ -19,6 +21,7 @@ const AUTH_WRITE_PATHS = new Set([
   '/auth/register',
   '/auth/login',
   '/auth/contact-verification',
+  '/auth/contact-verification/resend',
   '/auth/password-reset',
 ])
 
@@ -39,11 +42,18 @@ export async function handleAuthRoutes({
     const created = await registerIdentityAccount(input)
     return json(
       {
-        message: 'Akun dibuat. Verifikasi kontak sebelum transaksi.',
+        message: created.message,
         verificationUrl: created.verificationUrl,
+        canResendVerification: created.canResendVerification,
       },
       201,
     )
+  }
+
+  if (path === '/auth/contact-verification/resend' && method === 'POST') {
+    const input = await body<ContactVerificationResendRequestDto>(request)
+    limit(request, 'contact-verification-resend', 3, input.contact)
+    return json(await resendIdentityAccountContactVerification(input))
   }
 
   if (path === '/auth/contact-verification' && method === 'POST') {

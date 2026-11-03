@@ -6,20 +6,22 @@ import {
   loginIdentity,
   logoutIdentity,
   registerIdentity,
+  resendIdentityContactVerification,
   resetIdentityPassword,
   verifyIdentityContact,
 } from './application/auth.service'
 import type {
   ContactVerificationRequestDto,
+  ContactVerificationResendRequestDto,
   LoginRequestDto,
   PasswordResetRequestDto,
   RegisterRequestDto,
 } from './application/auth.dto'
 import { PostgresIdentityRepository } from './infrastructure/auth.repository'
-import { SmtpPasswordResetMailer } from './infrastructure/password-reset-email'
+import { SmtpIdentityMailer } from './infrastructure/password-reset-email'
 
 const repository = new PostgresIdentityRepository()
-const passwordResetMailer = new SmtpPasswordResetMailer()
+const identityMailer = new SmtpIdentityMailer()
 const mfa = {
   verify: (encryptedSecret: string, code: string) =>
     verifyTotp(decryptMfaSecret(encryptedSecret), code),
@@ -30,11 +32,14 @@ export const createSession = (userId: string) => createIdentitySession(repositor
 export const issueToken = (userId: string, type: string, target: string | null) =>
   createIdentityToken(repository, userId, type, target)
 export const registerIdentityAccount = (input: RegisterRequestDto) =>
-  registerIdentity(repository, input)
+  registerIdentity(repository, identityMailer, input)
+export const resendIdentityAccountContactVerification = (
+  input: ContactVerificationResendRequestDto,
+) => resendIdentityContactVerification(repository, identityMailer, input)
 export const verifyIdentityAccountContact = (input: ContactVerificationRequestDto) =>
   verifyIdentityContact(repository, input)
 export const resetIdentityAccountPassword = (input: PasswordResetRequestDto) =>
-  resetIdentityPassword(repository, passwordResetMailer, input)
+  resetIdentityPassword(repository, identityMailer, input)
 export const loginIdentityAccount = (input: LoginRequestDto) =>
   loginIdentity(repository, mfa, input)
 export const logoutIdentitySession = (token: string | null) => logoutIdentity(repository, token)

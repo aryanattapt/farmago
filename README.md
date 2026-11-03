@@ -37,11 +37,11 @@ Katalog dapat dijelajahi tanpa login. Untuk transaksi, daftar lalu gunakan tauta
 - Pemeriksaan stok dan harga ulang saat pesanan dibuat; quote berubah memerlukan persetujuan ulang; job melepas reservasi yang belum dibayar setelah batas waktu.
 - Pemenuhan mencatat hasil pemeriksaan akhir; produk yang ditandai perlu pelacakan batch mewajibkan nomor lot, tanggal kedaluwarsa yang belum lewat, dan jumlah lot sesuai pesanan. Pesanan resep harus disahkan apoteker sebelum siap; pemeriksaan gagal membuka kasus operasional untuk CS.
 
-## Email reset kata sandi
+## Email verifikasi dan reset kata sandi
 
-Di production, tautan reset dikirim lewat SMTP. Isi `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, dan `EMAIL_FROM` pada `.env` atau `.env.production` sesuai pengaturan mail hosting/domain. Umumnya port 465 memakai `SMTP_SECURE=true` (TLS), sedangkan port 587 memakai `SMTP_SECURE=false` dengan STARTTLS. Jika relay SMTP mengizinkan koneksi tanpa autentikasi, `SMTP_USER` dan `SMTP_PASSWORD` boleh dikosongkan. Pastikan `EMAIL_FROM` diizinkan oleh server SMTP, domain pengirim memiliki konfigurasi SPF/DKIM dari provider email, dan `WEB_ORIGIN` mengarah ke alamat web publik.
+Di production, email verifikasi pendaftaran dan tautan reset dikirim lewat SMTP. Isi `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, dan `EMAIL_FROM` pada `.env` atau `.env.production` sesuai pengaturan mail hosting/domain. Pendaftaran production memakai email; pendaftaran dengan nomor telepon saja belum tersedia sampai adapter SMS ditambahkan. Jika email verifikasi belum masuk, gunakan tombol kirim ulang pada form akun. Umumnya port 465 memakai `SMTP_SECURE=true` (TLS), sedangkan port 587 memakai `SMTP_SECURE=false` dengan STARTTLS. Jika relay SMTP mengizinkan koneksi tanpa autentikasi, `SMTP_USER` dan `SMTP_PASSWORD` boleh dikosongkan. Pastikan `EMAIL_FROM` diizinkan oleh server SMTP, domain pengirim memiliki konfigurasi SPF/DKIM dari provider email, dan `WEB_ORIGIN` mengarah ke alamat web publik.
 
-API tetap mengembalikan pesan generik dan tidak menyertakan tautan reset di production. Di development, API menyertakan `resetUrl` agar alur bisa diuji manual. Token berlaku 30 menit. Akun harus memiliki email terdaftar; reset untuk akun yang hanya memiliki nomor telepon memerlukan adapter SMS terpisah.
+API tidak menyertakan tautan verifikasi atau reset pada respons production. Di development, tautan verifikasi dan `resetUrl` tersedia untuk pengujian manual; token berlaku 30 menit. Form pendaftaran menyediakan kirim ulang email verifikasi. Akun harus memiliki email terdaftar; verifikasi dan pemulihan akun dengan nomor telepon memerlukan adapter SMS terpisah.
 
 ## Integrasi dan gerbang sebelum pilot
 

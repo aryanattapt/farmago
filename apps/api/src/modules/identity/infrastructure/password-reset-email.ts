@@ -11,28 +11,45 @@ type SmtpConfig = {
 
 let transporter: ReturnType<typeof nodemailer.createTransport> | null = null
 
-export class SmtpPasswordResetMailer {
+export class SmtpIdentityMailer {
   isConfigured() {
     return getSmtpConfig() !== null
+  }
+
+  async sendContactVerificationEmail(to: string, verificationUrl: string) {
+    const config = getSmtpConfig()
+    if (!config) throw new Error('SMTP_NOT_CONFIGURED')
+
+    await getTransporter(config).sendMail({
+      from: config.from,
+      to,
+      subject: 'Verifikasi email akun FarmaGO',
+      text: [
+        'Kami menerima pendaftaran akun FarmaGO menggunakan alamat email ini.',
+        '',
+        'Verifikasi email sebelum bertransaksi dengan membuka tautan berikut:',
+        verificationUrl,
+        '',
+        'Tautan berlaku selama 30 menit. Abaikan email ini jika Anda tidak membuat akun.',
+      ].join('\n'),
+      html: [
+        '<!doctype html>',
+        '<html lang="id"><body>',
+        '<h1>Verifikasi email FarmaGO</h1>',
+        '<p>Kami menerima pendaftaran akun FarmaGO menggunakan alamat email ini.</p>',
+        '<p>Verifikasi email sebelum bertransaksi dengan membuka tautan berikut:</p>',
+        '<p><a href="' + escapeHtml(verificationUrl) + '">Verifikasi email</a></p>',
+        '<p>Tautan berlaku selama 30 menit. Abaikan email ini jika Anda tidak membuat akun.</p>',
+        '</body></html>',
+      ].join(''),
+    })
   }
 
   async sendPasswordResetEmail(to: string, resetUrl: string) {
     const config = getSmtpConfig()
     if (!config) throw new Error('SMTP_NOT_CONFIGURED')
 
-    transporter ??= nodemailer.createTransport({
-      host: config.host,
-      port: config.port,
-      secure: config.secure,
-      ...(config.user ? { auth: { user: config.user, pass: config.password } } : {}),
-      requireTLS: !config.secure,
-      tls: { minVersion: 'TLSv1.2' },
-      connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 20_000,
-    })
-
-    await transporter.sendMail({
+    await getTransporter(config).sendMail({
       from: config.from,
       to,
       subject: 'Atur ulang kata sandi FarmaGO',
@@ -55,6 +72,21 @@ export class SmtpPasswordResetMailer {
       ].join(''),
     })
   }
+}
+
+function getTransporter(config: SmtpConfig) {
+  transporter ??= nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    ...(config.user ? { auth: { user: config.user, pass: config.password } } : {}),
+    requireTLS: !config.secure,
+    tls: { minVersion: 'TLSv1.2' },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
+  })
+  return transporter
 }
 
 function getSmtpConfig(): SmtpConfig | null {

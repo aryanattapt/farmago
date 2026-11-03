@@ -1,5 +1,6 @@
 export type {
   ContactVerificationRequestDto,
+  ContactVerificationResendRequestDto,
   LoginRequestDto,
   PasswordResetRequestDto,
   RegisterRequestDto,
