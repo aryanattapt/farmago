@@ -20,6 +20,8 @@ Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sud
 - Bucket rate limit yang kedaluwarsa dibersihkan berkala agar memori API tidak terus tumbuh.
 - Temuan review awal diperbaiki: klasifikasi dan aktivasi katalog dibatasi ke apoteker; order mengunci status apotek saat dibuat; referensi bukti pickup tersimpan lewat migrasi; file resep dibersihkan jika transaksi gagal.
 - Registrasi dan verifikasi kontak berjalan dalam transaksi; email verifikasi pendaftaran serta reset kata sandi production dikirim lewat SMTP. Login membatasi kata sandi maksimum 128 karakter.
+- Checkout menampilkan daftar apotek yang memenuhi stok/alamat agar buyer memilih apotek sebelum rincian quote dibuat.
+- Detail order menampilkan status dan timeline AWB Komerce; worker API menyinkronkan maksimal 25 resi aktif setiap 10 menit, terlepas dari modal order dibuka.
 - Validasi jam layanan menolak jam, tanggal, timezone, dan jadwal ganda yang tidak valid; seed menolak environment production.
 - Alur alamat pengiriman baru memakai alamat hasil simpan; panel katalog apoteker menampilkan kontrol buat dan aktivasi produk.
 - README menjelaskan cara menjalankan aplikasi dan batas kesiapan integrasi.
@@ -29,22 +31,22 @@ Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sud
 | Kebutuhan | Status | Catatan |
 |---|---|---|
 | PR-01 Akun dan sesi | Sebagian | Email verifikasi pendaftaran dan reset kata sandi production dikirim lewat SMTP; pengiriman ulang verifikasi tersedia. SMS belum terhubung sehingga pendaftaran dengan nomor telepon saja dinonaktifkan di production. |
-| PR-02 Alamat dan pengambilan | Sebagian | Alamat dan pengambilan tersedia; pengiriman belum aktif. |
+| PR-02 Alamat dan pengambilan | Sebagian | Alamat, pickup, alamat tujuan RajaOngkir, quote pengiriman, dan pilihan kurir buyer tersedia; UAT Komerce untuk pemenuhan produksi masih diperlukan. |
 | PR-03 Katalog | Dikerjakan | Katalog, pencarian, kategori, harga indikatif, dan penanda resep tersedia. |
 | PR-04 Keranjang dan pemeriksaan ulang | Dikerjakan | Harga/stok diperiksa kembali; perubahan quote memerlukan persetujuan ulang. |
-| PR-05 Pemilihan apotek | Sebagian | Sistem memilih satu apotek dengan stok; cakupan pengiriman menunggu integrasi kurir. |
+| PR-05 Pemilihan apotek | Dikerjakan | Checkout menampilkan apotek yang memenuhi stok dan alamat; buyer memilih apotek sebelum quote. Ketersediaan tetap diperiksa saat quote dan pesanan dibuat. |
 | PR-06 Pesanan dan stok | Dikerjakan | Reservasi stok atomik, pembatasan stok, kedaluwarsa reservasi belum dibayar, dan idempotensi tersedia. |
 | PR-07 Resep | Sebagian | Unggah, klarifikasi dan keputusan apoteker tersedia; SOP keaslian, pasien, resep elektronik/asli dan penggunaan ulang belum disahkan. |
 | PR-08 Pembayaran | Belum selesai | Adapter pembayaran dan webhook belum dipilih/dipasang; tagihan mengembalikan `503`. |
-| PR-09 Pemenuhan | Sebagian | Pemeriksaan, lot, kewenangan apoteker dan pickup tersedia; booking kurir/pengiriman belum aktif. |
-| PR-10 Pelacakan | Sebagian | Status dan riwayat pesanan tersedia; status pembayaran/pengiriman nyata bergantung pada adapter. |
+| PR-09 Pemenuhan | Sebagian | Pemeriksaan, lot, pickup, booking Komerce, request pickup, dan label tersedia; konfigurasi serta UAT langsung Komerce production masih diperlukan. |
+| PR-10 Pelacakan | Sebagian | Worker menyinkronkan status dan timeline AWB Komerce di background setiap 10 menit; detail pesanan dapat memuat status terbaru. UAT provider production masih diperlukan. |
 | PR-11 Pembatalan dan refund | Sebagian | Permintaan dan keputusan pembatalan tersedia; refund ke penyedia belum terhubung dan kebijakan final belum disetujui. |
 | PR-12 Admin dan audit | Sebagian | Alur admin dan pencatatan tindakan tersedia; validasi peran, audit dan UAT masih perlu dilakukan. |
 
 ## Belum dikerjakan atau masih menunggu keputusan
 
-- Pilih serta integrasikan penyedia pembayaran dan kurir, tarif pengiriman, webhook, rekonsiliasi, dan refund.
-- Hubungkan SMS untuk verifikasi nomor telepon dan pemulihan akun; validasi deliverability SMTP di production.
+- Pilih serta integrasikan penyedia pembayaran, webhook pembayaran, rekonsiliasi, dan refund; validasi koneksi tarif/booking/pickup, label, serta tracking kurir dengan akun Komerce sandbox dan production.
+- Hubungkan penyedia SMS untuk verifikasi nomor telepon dan pemulihan akun; validasi deliverability SMTP di production.
 - Pindahkan berkas resep ke object storage privat dan tambahkan pemindaian malware.
 - Sahkan kebijakan refund, ongkir/biaya, retensi, izin, peran pemrosesan data, SOP resep, kategori produk, dan prosedur pilot.
 - Tentukan apotek/wilayah pilot dan buktikan pemisahan stok daring dari stok kasir atau siapkan integrasi POS.

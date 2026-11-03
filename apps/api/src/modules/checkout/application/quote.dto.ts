@@ -5,6 +5,7 @@ export type CreateQuoteRequestDto = {
   items?: unknown
   fulfillmentMethod?: string
   addressId?: string
+  pharmacyId?: string
   shippingSelection?: unknown
 }
 
@@ -13,6 +14,7 @@ export type BuildQuoteInputDto = {
   addressId: string | null
   fulfillmentMethod: 'pickup' | 'delivery'
   items: CartItem[]
+  pharmacyId?: string
   shippingSelection?: { courierCode: string; service: string }
 }
 

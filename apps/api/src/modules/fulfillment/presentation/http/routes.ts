@@ -1,7 +1,7 @@
 import * as shared from '../../../../shared/api'
 import type { AuthenticatedRouteContext } from '../../../../shared/http/route-context'
 import type { FulfillmentCheckRequestDto, FulfillmentCommandRequestDto, ShipmentPickupRequestDto } from './dto'
-import { downloadShipmentLabel, requestShipmentBooking, runFulfillmentCommand, saveFulfillmentCheck, scheduleShipmentPickup } from '../../public'
+import { downloadShipmentLabel, fetchCustomerShipmentTracking, requestShipmentBooking, runFulfillmentCommand, saveFulfillmentCheck, scheduleShipmentPickup } from '../../public'
 
 const { body, json, limit, requireRole } = shared
 
@@ -11,6 +11,13 @@ export async function handleFulfillmentRoutes({
   method,
   currentUser,
 }: AuthenticatedRouteContext): Promise<Response | null> {
+  const trackingMatch = path.match(/^\/orders\/([0-9a-f-]+)\/shipment-tracking$/i)
+  if (trackingMatch && method === 'GET') {
+    requireRole(currentUser, 'customer')
+    limit(request, 'shipment-tracking', 12, currentUser.id)
+    return json(await fetchCustomerShipmentTracking(trackingMatch[1], currentUser.id))
+  }
+
   const fulfillmentMatch = path.match(/^\/orders\/([0-9a-f-]+)\/fulfillment$/i)
   if (fulfillmentMatch && method === 'POST') {
     requireRole(currentUser, 'pharmacist', 'pharmacy_staff')

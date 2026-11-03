@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { canAccessPharmacy, hasRole, type User } from '../../../shared/domain/access'
-import { eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { db, transaction } from '../../../infrastructure/database/client'
 import { orders, shipments } from '../../../infrastructure/database/schema'
 import { KomerceDeliveryClient, KomerceDeliveryError } from '../../shipping'
@@ -557,6 +557,177 @@ export class PostgresFulfillmentRepository implements FulfillmentRepository {
     }
   }
 
+  async getShipmentTracking(orderId: string, customerId: string) {
+    const [shipment] = await db
+      .select({
+        method: shipments.method,
+        trackingNumber: shipments.trackingNumber,
+        trackingStatus: shipments.trackingStatus,
+        trackingHistory: shipments.trackingHistory,
+        trackingCheckedAt: shipments.trackingCheckedAt,
+        trackingAttemptedAt: shipments.trackingAttemptedAt,
+        shippingSnapshot: orders.shippingSnapshot,
+      })
+      .from(orders)
+      .innerJoin(shipments, eq(shipments.orderId, orders.id))
+      .where(and(eq(orders.id, orderId), eq(orders.customerId, customerId)))
+      .limit(1)
+    if (!shipment) fail(404, 'NOT_FOUND', 'Pesanan pengiriman tidak ditemukan.')
+    if (shipment.method !== 'delivery')
+      fail(409, 'SHIPMENT_METHOD_MISMATCH', 'Pelacakan hanya tersedia untuk pesanan pengiriman.')
+    if (!shipment.trackingNumber)
+      fail(409, 'TRACKING_NOT_READY', 'Nomor resi belum tersedia dari kurir.')
+    if (!this.deliveryClient.isConfigured())
+      fail(503, 'DELIVERY_PROVIDER_NOT_CONFIGURED', 'Shipping Delivery Komerce belum dikonfigurasi.')
+
+    const trackingNumber = shipment.trackingNumber
+    const refreshedAt = shipment.trackingCheckedAt?.toISOString() ?? null
+    const attemptedAt = shipment.trackingAttemptedAt?.getTime() ?? 0
+    const checkedAt = shipment.trackingCheckedAt?.getTime() ?? 0
+    if (attemptedAt && Date.now() - attemptedAt < 30_000) {
+      if (!shipment.trackingCheckedAt)
+        fail(503, 'TRACKING_TEMPORARILY_UNAVAILABLE', 'Status kurir sedang diperbarui. Coba lagi sebentar.')
+      return {
+        trackingNumber,
+        lastStatus: shipment.trackingStatus,
+        history: Array.isArray(shipment.trackingHistory) ? shipment.trackingHistory : [],
+        refreshedAt,
+        stale: attemptedAt > checkedAt,
+      }
+    }
+
+    const courier = trackingCourier(shipment.shippingSnapshot)
+    if (!courier)
+      fail(422, 'TRACKING_DATA_INCOMPLETE', 'Informasi kurir pada pesanan tidak tersedia.')
+
+    const [claimed] = await db
+      .update(shipments)
+      .set({ trackingAttemptedAt: sql`now()` })
+      .where(
+        and(
+          eq(shipments.orderId, orderId),
+          sql`(${shipments.trackingAttemptedAt} IS NULL OR ${shipments.trackingAttemptedAt} < now() - interval '30 seconds')`,
+        ),
+      )
+      .returning({ orderId: shipments.orderId })
+    if (!claimed) {
+      if (!shipment.trackingCheckedAt)
+        fail(503, 'TRACKING_TEMPORARILY_UNAVAILABLE', 'Status kurir sedang diperbarui. Coba lagi sebentar.')
+      return {
+        trackingNumber,
+        lastStatus: shipment.trackingStatus,
+        history: Array.isArray(shipment.trackingHistory) ? shipment.trackingHistory : [],
+        refreshedAt,
+        stale: true,
+      }
+    }
+
+    try {
+      const tracking = await this.deliveryClient.getAirwayBillHistory(courier, trackingNumber)
+      await db
+        .update(shipments)
+        .set({
+          trackingNumber: tracking.airwayBill,
+          trackingStatus: tracking.lastStatus,
+          trackingHistory: tracking.history,
+          trackingCheckedAt: sql`now()`,
+        })
+        .where(eq(shipments.orderId, orderId))
+      return {
+        trackingNumber: tracking.airwayBill,
+        lastStatus: tracking.lastStatus,
+        history: tracking.history,
+        refreshedAt: new Date().toISOString(),
+        stale: false,
+      }
+    } catch (error) {
+      if (shipment.trackingCheckedAt) {
+        return {
+          trackingNumber,
+          lastStatus: shipment.trackingStatus,
+          history: Array.isArray(shipment.trackingHistory) ? shipment.trackingHistory : [],
+          refreshedAt,
+          stale: true,
+        }
+      }
+      if (error instanceof KomerceDeliveryError && error.outcome === 'rejected')
+        fail(422, 'TRACKING_UNAVAILABLE', 'Komerce belum dapat mengambil status untuk resi ini.')
+      fail(503, 'TRACKING_TEMPORARILY_UNAVAILABLE', 'Status kurir belum dapat diperbarui. Coba lagi nanti.')
+    }
+  }
+
+  async syncPendingShipmentTracking(limit = 100) {
+    if (!this.deliveryClient.isConfigured())
+      return { checked: 0, synced: 0, failed: 0, skipped: 0 }
+
+    const dueShipments = await db
+      .select({
+        orderId: shipments.orderId,
+        trackingNumber: shipments.trackingNumber,
+        shippingSnapshot: orders.shippingSnapshot,
+      })
+      .from(orders)
+      .innerJoin(shipments, eq(shipments.orderId, orders.id))
+      .where(
+        and(
+          eq(shipments.method, 'delivery'),
+          sql`${shipments.trackingNumber} IS NOT NULL`,
+          sql`(${shipments.trackingAttemptedAt} IS NULL OR ${shipments.trackingAttemptedAt} < now() - interval '10 minutes')`,
+          sql`${orders.status} NOT IN ('completed', 'cancelled', 'canceled', 'expired')`,
+        ),
+      )
+      .orderBy(sql`${shipments.trackingAttemptedAt} ASC NULLS FIRST`)
+      .limit(Math.min(Math.max(limit, 1), 25))
+
+    let synced = 0
+    let failed = 0
+    let skipped = 0
+    for (const shipment of dueShipments) {
+      if (!shipment.trackingNumber) {
+        skipped += 1
+        continue
+      }
+      const courier = trackingCourier(shipment.shippingSnapshot)
+      if (!courier) {
+        skipped += 1
+        continue
+      }
+      try {
+        const [claimed] = await db
+          .update(shipments)
+          .set({ trackingAttemptedAt: sql`now()` })
+          .where(
+            and(
+              eq(shipments.orderId, shipment.orderId),
+              sql`(${shipments.trackingAttemptedAt} IS NULL OR ${shipments.trackingAttemptedAt} < now() - interval '10 minutes')`,
+            ),
+          )
+          .returning({ orderId: shipments.orderId })
+        if (!claimed) {
+          skipped += 1
+          continue
+        }
+        const tracking = await this.deliveryClient.getAirwayBillHistory(
+          courier,
+          shipment.trackingNumber,
+        )
+        await db
+          .update(shipments)
+          .set({
+            trackingNumber: tracking.airwayBill,
+            trackingStatus: tracking.lastStatus,
+            trackingHistory: tracking.history,
+            trackingCheckedAt: sql`now()`,
+          })
+          .where(eq(shipments.orderId, shipment.orderId))
+        synced += 1
+      } catch {
+        failed += 1
+      }
+    }
+    return { checked: dueShipments.length, synced, failed, skipped }
+  }
+
   async getShipmentLabel(orderId: string, actor: User) {
     if (!this.deliveryClient.isConfigured())
       fail(503, 'DELIVERY_PROVIDER_NOT_CONFIGURED', 'Shipping Delivery Komerce belum dikonfigurasi.')
@@ -584,6 +755,18 @@ export class PostgresFulfillmentRepository implements FulfillmentRepository {
       fail(503, 'DELIVERY_LABEL_UNAVAILABLE', 'Label pengiriman belum dapat diambil. Coba lagi sebentar.')
     }
   }
+}
+
+function trackingCourier(value: unknown) {
+  let snapshot: any = value
+  if (typeof value === 'string') {
+    try {
+      snapshot = JSON.parse(value)
+    } catch {
+      return ''
+    }
+  }
+  return String(snapshot?.courierCode ?? snapshot?.courierName ?? '').trim().toLowerCase()
 }
 
 function pinPoint(latitude: unknown, longitude: unknown) {
