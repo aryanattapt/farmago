@@ -5,6 +5,7 @@ import {
   getShipmentLabel,
   getShipmentTracking,
   requestShipmentPickup,
+  receiveKomerceShipmentWebhook as executeKomerceShipmentWebhook,
 } from './application/fulfillment.service'
 import { PostgresFulfillmentRepository } from './infrastructure/fulfillment.repository'
 
@@ -24,5 +25,7 @@ export const downloadShipmentLabel = (...args: Parameters<typeof getShipmentLabe
 
 export const fetchCustomerShipmentTracking = (...args: Parameters<typeof getShipmentTracking>) =>
   getShipmentTracking(repository, ...args)
+export const receiveKomerceShipmentWebhook = (input: Parameters<typeof executeKomerceShipmentWebhook>[1]) =>
+  executeKomerceShipmentWebhook(repository, input)
 
 export const syncPendingShipmentTracking = () => repository.syncPendingShipmentTracking()

@@ -62,6 +62,10 @@ export async function getOrderView(
           pickupDate: shipment.pickup_date,
           pickupTime: shipment.pickup_time,
           pickupVehicle: shipment.pickup_vehicle,
+          handedOverAt: shipment.handed_over_at,
+          ...(order.customer_id !== user.id && shipment.handover_reference
+            ? { handoverReference: shipment.handover_reference }
+            : {}),
         }
       : null,
     expiresAt: order.expires_at,

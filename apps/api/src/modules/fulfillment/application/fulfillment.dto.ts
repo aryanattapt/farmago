@@ -22,3 +22,9 @@ export type ShipmentPickupRequestDto = {
   pickupTime?: string
   pickupVehicle?: 'Motor' | 'Mobil' | 'Truk' | string
 }
+
+export type KomerceDeliveryWebhookDto = {
+  orderNo: string
+  airwayBill: string | null
+  status: string
+}

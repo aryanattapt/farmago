@@ -8,10 +8,12 @@ import { buildKomerceStoreOrderPayload, validateKomercePickupInput } from '../do
 import { recordAudit } from '../../platform'
 import { canTransitionOrder, insertOrderStatusHistory, normalizePickupCode } from '../../orders'
 import { parseDispensedLots } from '../domain/dispensed-lots'
+import { mapKomerceShipmentStatus } from '../domain/komerce-shipment-status'
 import type {
   FulfillmentCheckRequestDto,
   FulfillmentCommandRequestDto,
   FulfillmentItemRequestDto,
+  KomerceDeliveryWebhookDto,
 } from '../application/fulfillment.dto'
 import {
   FulfillmentOperationError,
@@ -130,7 +132,27 @@ export class PostgresFulfillmentRepository implements FulfillmentRepository {
         await insertOrderStatusHistory(client, order.id, 'ready', 'completed', actor.id, 'pickup')
         input.proofReference = proofReference
       } else if (input.command === 'handover_to_courier') {
-        fail(422, 'PICKUP_SCHEDULE_REQUIRED', 'Jadwalkan pickup kurir melalui formulir pengiriman.')
+        if (order.fulfillment_method !== 'delivery' || !canTransitionOrder(order.status, 'in_delivery'))
+          fail(409, 'INVALID_ORDER_STATE', 'Hanya pesanan pengiriman yang siap dapat diserahkan ke kurir.')
+        const selectedShipment = await client.query(
+          'SELECT id,method,status,tracking_number FROM shipments WHERE order_id=$1 FOR UPDATE',
+          [order.id],
+        )
+        if (!selectedShipment.rowCount || selectedShipment.rows[0].method !== 'delivery')
+          fail(409, 'SHIPMENT_NOT_BOOKED', 'Buat order kurir sebelum mencatat serah-terima.')
+        const shipment = selectedShipment.rows[0]
+        if (shipment.status !== 'pickup_requested')
+          fail(409, 'COURIER_PICKUP_NOT_CONFIRMED', 'Jadwalkan pickup kurir sebelum mencatat serah-terima.')
+        const proofReference = String(input.proofReference ?? shipment.tracking_number ?? '').trim()
+        if (!proofReference || proofReference.length > 200)
+          fail(422, 'COURIER_HANDOVER_PROOF_REQUIRED', 'Referensi bukti serah-terima wajib diisi.')
+        await client.query("UPDATE orders SET status='in_delivery',updated_at=now() WHERE id=$1", [order.id])
+        await client.query(
+          "UPDATE shipments SET status='in_delivery',handover_reference=$2,handed_over_at=now() WHERE id=$1",
+          [shipment.id, proofReference],
+        )
+        await insertOrderStatusHistory(client, order.id, 'ready', 'in_delivery', actor.id, 'courier_handover')
+        input.proofReference = proofReference
       } else fail(400, 'INVALID_COMMAND', 'Perintah pemenuhan tidak dikenal.')
       await recordAudit(
         client,
@@ -138,7 +160,9 @@ export class PostgresFulfillmentRepository implements FulfillmentRepository {
         `fulfillment.${input.command}`,
         'order',
         order.id,
-        input.command === 'confirm_pickup' ? { proofReference: input.proofReference } : {},
+        ['confirm_pickup', 'handover_to_courier'].includes(input.command ?? '')
+          ? { proofReference: input.proofReference }
+          : {},
       )
       return {
         orderId: order.id,
@@ -147,7 +171,9 @@ export class PostgresFulfillmentRepository implements FulfillmentRepository {
             ? 'processing'
             : input.command === 'mark_ready'
               ? 'ready'
-              : 'completed',
+              : input.command === 'handover_to_courier'
+                ? 'in_delivery'
+                : 'completed',
       }
     })
   }
@@ -561,6 +587,8 @@ export class PostgresFulfillmentRepository implements FulfillmentRepository {
     const [shipment] = await db
       .select({
         method: shipments.method,
+        status: shipments.status,
+        orderStatus: orders.status,
         trackingNumber: shipments.trackingNumber,
         trackingStatus: shipments.trackingStatus,
         trackingHistory: shipments.trackingHistory,
@@ -591,6 +619,8 @@ export class PostgresFulfillmentRepository implements FulfillmentRepository {
         trackingNumber,
         lastStatus: shipment.trackingStatus,
         history: Array.isArray(shipment.trackingHistory) ? shipment.trackingHistory : [],
+        orderStatus: shipment.orderStatus,
+        shipmentStatus: shipment.status,
         refreshedAt,
         stale: attemptedAt > checkedAt,
       }
@@ -617,6 +647,8 @@ export class PostgresFulfillmentRepository implements FulfillmentRepository {
         trackingNumber,
         lastStatus: shipment.trackingStatus,
         history: Array.isArray(shipment.trackingHistory) ? shipment.trackingHistory : [],
+        orderStatus: shipment.orderStatus,
+        shipmentStatus: shipment.status,
         refreshedAt,
         stale: true,
       }
@@ -624,19 +656,13 @@ export class PostgresFulfillmentRepository implements FulfillmentRepository {
 
     try {
       const tracking = await this.deliveryClient.getAirwayBillHistory(courier, trackingNumber)
-      await db
-        .update(shipments)
-        .set({
-          trackingNumber: tracking.airwayBill,
-          trackingStatus: tracking.lastStatus,
-          trackingHistory: tracking.history,
-          trackingCheckedAt: sql`now()`,
-        })
-        .where(eq(shipments.orderId, orderId))
+      const saved = await persistKomerceTrackingUpdate(orderId, tracking, 'polling')
       return {
-        trackingNumber: tracking.airwayBill,
-        lastStatus: tracking.lastStatus,
-        history: tracking.history,
+        trackingNumber: saved.trackingNumber,
+        lastStatus: saved.lastStatus,
+        history: saved.history,
+        orderStatus: saved.orderStatus,
+        shipmentStatus: saved.shipmentStatus,
         refreshedAt: new Date().toISOString(),
         stale: false,
       }
@@ -646,6 +672,8 @@ export class PostgresFulfillmentRepository implements FulfillmentRepository {
           trackingNumber,
           lastStatus: shipment.trackingStatus,
           history: Array.isArray(shipment.trackingHistory) ? shipment.trackingHistory : [],
+          orderStatus: shipment.orderStatus,
+          shipmentStatus: shipment.status,
           refreshedAt,
           stale: true,
         }
@@ -711,21 +739,47 @@ export class PostgresFulfillmentRepository implements FulfillmentRepository {
           courier,
           shipment.trackingNumber,
         )
-        await db
-          .update(shipments)
-          .set({
-            trackingNumber: tracking.airwayBill,
-            trackingStatus: tracking.lastStatus,
-            trackingHistory: tracking.history,
-            trackingCheckedAt: sql`now()`,
-          })
-          .where(eq(shipments.orderId, shipment.orderId))
+        await persistKomerceTrackingUpdate(shipment.orderId, tracking, 'polling')
         synced += 1
       } catch {
         failed += 1
       }
     }
     return { checked: dueShipments.length, synced, failed, skipped }
+  }
+
+  async receiveKomerceWebhook(input: KomerceDeliveryWebhookDto) {
+    const matches = await db
+      .select({
+        orderId: shipments.orderId,
+        trackingNumber: shipments.trackingNumber,
+      })
+      .from(shipments)
+      .where(
+        and(
+          eq(shipments.method, 'delivery'),
+          eq(shipments.provider, 'Komerce'),
+          eq(shipments.providerOrderNo, input.orderNo),
+        ),
+      )
+      .limit(2)
+    if (!matches.length) fail(404, 'SHIPMENT_NOT_FOUND', 'Order Komerce tidak cocok dengan pengiriman FarmaGO.')
+    if (matches.length > 1)
+      fail(409, 'SHIPMENT_ORDER_AMBIGUOUS', 'Nomor order Komerce cocok dengan lebih dari satu pesanan FarmaGO.')
+    const shipment = matches[0]
+    if (input.airwayBill && shipment.trackingNumber && input.airwayBill !== shipment.trackingNumber)
+      fail(409, 'TRACKING_NUMBER_MISMATCH', 'AWB webhook Komerce tidak cocok dengan resi pesanan.')
+    const saved = await persistKomerceTrackingUpdate(
+      shipment.orderId,
+      {
+        airwayBill: input.airwayBill || shipment.trackingNumber || '',
+        lastStatus: input.status,
+        history: [],
+      },
+      'webhook',
+      input.orderNo,
+    )
+    return { received: true, ...saved }
   }
 
   async getShipmentLabel(orderId: string, actor: User) {
@@ -755,6 +809,135 @@ export class PostgresFulfillmentRepository implements FulfillmentRepository {
       fail(503, 'DELIVERY_LABEL_UNAVAILABLE', 'Label pengiriman belum dapat diambil. Coba lagi sebentar.')
     }
   }
+}
+
+type KomerceTrackingSnapshot = {
+  airwayBill: string
+  lastStatus: string | null
+  history: unknown[]
+}
+
+async function persistKomerceTrackingUpdate(
+  orderId: string,
+  update: KomerceTrackingSnapshot,
+  source: 'polling' | 'webhook',
+  expectedOrderNo?: string,
+) {
+  return transaction(async (client) => {
+    const selected = await client.query(
+      `SELECT o.id,o.customer_id,o.status,o.fulfillment_method,
+        s.id AS shipment_id,s.method AS shipment_method,s.status AS shipment_status,
+        s.provider_order_no,s.tracking_number,s.tracking_status,s.tracking_history
+      FROM orders o JOIN shipments s ON s.order_id=o.id
+      WHERE o.id=$1 FOR UPDATE OF o,s`,
+      [orderId],
+    )
+    if (!selected.rowCount) fail(404, 'NOT_FOUND', 'Pengiriman tidak ditemukan.')
+    const order = selected.rows[0]
+    if (order.fulfillment_method !== 'delivery' || order.shipment_method !== 'delivery')
+      fail(409, 'SHIPMENT_METHOD_MISMATCH', 'Pelacakan hanya tersedia untuk pesanan pengiriman.')
+    if (expectedOrderNo && order.provider_order_no !== expectedOrderNo)
+      fail(409, 'SHIPMENT_ORDER_MISMATCH', 'Nomor order webhook Komerce tidak cocok.')
+    const airwayBill = String(update.airwayBill ?? '').trim() || order.tracking_number || null
+    if (airwayBill && order.tracking_number && airwayBill !== order.tracking_number)
+      fail(409, 'TRACKING_NUMBER_MISMATCH', 'Komerce mengembalikan nomor resi yang berbeda.')
+    const lastStatus = String(update.lastStatus ?? '').trim().slice(0, 160) || order.tracking_status || null
+    const statusKey = (value: unknown) => String(value ?? '').trim().toLocaleLowerCase('id-ID')
+    const statusChanged = Boolean(lastStatus) && statusKey(lastStatus) !== statusKey(order.tracking_status)
+    const oldHistory = Array.isArray(order.tracking_history) ? order.tracking_history : []
+    const history = source === 'webhook'
+      ? statusChanged
+        ? [...oldHistory.slice(-99), {
+            date: new Date().toISOString(),
+            code: 'KOMERCE_WEBHOOK',
+            status: lastStatus,
+            description: 'Pembaruan status diterima dari Komerce.',
+          }]
+        : oldHistory
+      : Array.isArray(update.history) && update.history.length ? update.history.slice(0, 100) : oldHistory
+
+    let orderStatus = String(order.status)
+    let shipmentStatus = String(order.shipment_status)
+    let orderChanged = false
+    let inferredHandover = false
+    const transitionOrder = async (next: 'in_delivery' | 'completed', reason: string) => {
+      if (!canTransitionOrder(orderStatus, next)) return false
+      const previous = orderStatus
+      await client.query('UPDATE orders SET status=$2,updated_at=now() WHERE id=$1', [order.id, next])
+      await insertOrderStatusHistory(client, order.id, previous, next, null, reason)
+      orderStatus = next
+      orderChanged = true
+      return true
+    }
+    const lifecycle = mapKomerceShipmentStatus(lastStatus)
+    const reason = lastStatus ? `Komerce: ${lastStatus}`.slice(0, 200) : 'Status Komerce'
+
+    if (lifecycle === 'in_delivery') {
+      if (orderStatus === 'ready') inferredHandover = await transitionOrder('in_delivery', reason)
+      if (orderStatus === 'in_delivery' && shipmentStatus !== 'exception')
+        shipmentStatus = 'in_delivery'
+    } else if (lifecycle === 'delivered') {
+      if (orderStatus === 'ready') inferredHandover = await transitionOrder('in_delivery', reason)
+      if (orderStatus === 'in_delivery') await transitionOrder('completed', reason)
+      if (orderStatus === 'completed') shipmentStatus = 'delivered'
+    } else if (lifecycle === 'exception' || lifecycle === 'cancelled') {
+      if (lifecycle === 'exception' && orderStatus === 'ready')
+        inferredHandover = await transitionOrder('in_delivery', reason)
+      shipmentStatus = 'exception'
+      if (statusChanged || order.shipment_status !== 'exception') {
+        const activeCase = await client.query(
+          "SELECT id FROM support_cases WHERE order_id=$1 AND category='delivery_exception' AND status<>'closed' LIMIT 1",
+          [order.id],
+        )
+        if (!activeCase.rowCount) {
+          const description = `Kendala pengiriman Komerce (${lastStatus}). AWB: ${airwayBill ?? 'belum tersedia'}. Pesanan perlu ditindaklanjuti CS.`
+          const opened = await client.query(
+            "INSERT INTO support_cases(order_id,opened_by,category,description) VALUES($1,$2,'delivery_exception',$3) RETURNING id",
+            [order.id, order.customer_id, description],
+          )
+          await recordAudit(client, null, 'support.opened', 'support_case', opened.rows[0].id, {
+            category: 'delivery_exception',
+            provider: 'Komerce',
+          })
+        }
+      }
+    }
+
+    await client.query(
+      `UPDATE shipments SET tracking_number=COALESCE($2,tracking_number),
+        tracking_status=COALESCE($3,tracking_status),tracking_history=$4::jsonb,tracking_checked_at=now(),
+        tracking_attempted_at=now(),status=$5,
+        handed_over_at=CASE WHEN $6::boolean THEN COALESCE(handed_over_at,now()) ELSE handed_over_at END,
+        handover_reference=CASE WHEN $7::text IS NULL THEN handover_reference ELSE COALESCE(handover_reference,$7) END
+      WHERE id=$1`,
+      [
+        order.shipment_id,
+        airwayBill,
+        lastStatus,
+        JSON.stringify(history),
+        shipmentStatus,
+        inferredHandover,
+        inferredHandover ? airwayBill : null,
+      ],
+    )
+    if (statusChanged || orderChanged) {
+      await recordAudit(client, null, 'shipment.tracking_updated', 'order', order.id, {
+        provider: 'Komerce',
+        source,
+        courierStatus: lastStatus,
+        orderStatus,
+        shipmentStatus,
+      })
+    }
+    return {
+      trackingNumber: airwayBill,
+      lastStatus,
+      history,
+      orderStatus,
+      shipmentStatus,
+      duplicate: !statusChanged && !orderChanged,
+    }
+  })
 }
 
 function trackingCourier(value: unknown) {

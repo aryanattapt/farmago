@@ -21,7 +21,7 @@ Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sud
 - Temuan review awal diperbaiki: klasifikasi dan aktivasi katalog dibatasi ke apoteker; order mengunci status apotek saat dibuat; referensi bukti pickup tersimpan lewat migrasi; file resep dibersihkan jika transaksi gagal.
 - Registrasi dan verifikasi kontak berjalan dalam transaksi; email verifikasi pendaftaran serta reset kata sandi production dikirim lewat SMTP. Login membatasi kata sandi maksimum 128 karakter.
 - Checkout menampilkan daftar apotek yang memenuhi stok/alamat agar buyer memilih apotek sebelum rincian quote dibuat.
-- Detail order menampilkan status dan timeline AWB Komerce; worker API menyinkronkan maksimal 25 resi aktif setiap 10 menit, terlepas dari modal order dibuka.
+- Detail order menampilkan status dan timeline AWB Komerce; worker API menyinkronkan maksimal 25 resi aktif setiap 10 menit. Status kurir dipetakan ke siklus pesanan, callback Komerce memakai token dan aman terhadap pengiriman ulang, serta kendala kurir membuka kasus bantuan.
 - Validasi jam layanan menolak jam, tanggal, timezone, dan jadwal ganda yang tidak valid; seed menolak environment production.
 - Alur alamat pengiriman baru memakai alamat hasil simpan; panel katalog apoteker menampilkan kontrol buat dan aktivasi produk.
 - README menjelaskan cara menjalankan aplikasi dan batas kesiapan integrasi.
@@ -38,14 +38,14 @@ Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sud
 | PR-06 Pesanan dan stok | Dikerjakan | Reservasi stok atomik, pembatasan stok, kedaluwarsa reservasi belum dibayar, dan idempotensi tersedia. |
 | PR-07 Resep | Sebagian | Unggah, klarifikasi dan keputusan apoteker tersedia; SOP keaslian, pasien, resep elektronik/asli dan penggunaan ulang belum disahkan. |
 | PR-08 Pembayaran | Belum selesai | Adapter pembayaran dan webhook belum dipilih/dipasang; tagihan mengembalikan `503`. |
-| PR-09 Pemenuhan | Sebagian | Pemeriksaan, lot, pickup, booking Komerce, request pickup, dan label tersedia; konfigurasi serta UAT langsung Komerce production masih diperlukan. |
-| PR-10 Pelacakan | Sebagian | Worker menyinkronkan status dan timeline AWB Komerce di background setiap 10 menit; detail pesanan dapat memuat status terbaru. UAT provider production masih diperlukan. |
+| PR-09 Pemenuhan | Sebagian | Pemeriksaan, lot, booking/pickup, label, konfirmasi serah-terima dengan referensi bukti, status `in_delivery`, dan kasus saat kurir terkendala tersedia; konfigurasi serta UAT Komerce sandbox/production masih diperlukan. |
+| PR-10 Pelacakan | Sebagian | Polling dan webhook Komerce mengubah status pesanan (`in_delivery`/`completed`), menyimpan timeline, dan menghindari transisi ulang; webhook memerlukan token callback. Konfigurasi endpoint dan UAT provider sandbox/production masih diperlukan. |
 | PR-11 Pembatalan dan refund | Sebagian | Permintaan dan keputusan pembatalan tersedia; refund ke penyedia belum terhubung dan kebijakan final belum disetujui. |
 | PR-12 Admin dan audit | Sebagian | Alur admin dan pencatatan tindakan tersedia; validasi peran, audit dan UAT masih perlu dilakukan. |
 
 ## Belum dikerjakan atau masih menunggu keputusan
 
-- Pilih serta integrasikan penyedia pembayaran, webhook pembayaran, rekonsiliasi, dan refund; validasi koneksi tarif/booking/pickup, label, serta tracking kurir dengan akun Komerce sandbox dan production.
+- Pilih serta integrasikan penyedia pembayaran, webhook pembayaran, rekonsiliasi, dan refund; konfigurasi URL webhook pengiriman dengan token `KOMERCE_DELIVERY_WEBHOOK_TOKEN`; validasi koneksi tarif/booking/pickup, label, tracking, status serah-terima dan kasus kurir dengan akun Komerce sandbox dan production.
 - Hubungkan penyedia SMS untuk verifikasi nomor telepon dan pemulihan akun; validasi deliverability SMTP di production.
 - Pindahkan berkas resep ke object storage privat dan tambahkan pemindaian malware.
 - Sahkan kebijakan refund, ongkir/biaya, retensi, izin, peran pemrosesan data, SOP resep, kategori produk, dan prosedur pilot.
