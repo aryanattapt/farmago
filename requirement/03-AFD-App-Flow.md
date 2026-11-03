@@ -12,8 +12,9 @@ flowchart TD
   C --> D{Apotek aktif dengan seluruh stok?}
   D -- Tidak --> E[Ubah alamat, apotek, atau keranjang]
   E --> C
-  D -- Ya --> F[Tampilkan apotek dan rincian biaya]
-  F --> V{Harga dan ongkir masih sama?}
+  D -- Ya --> F[Pelanggan memilih apotek yang memenuhi]
+  F --> F1[Tampilkan rincian apotek, harga, dan ongkir]
+  F1 --> V{Harga dan ongkir masih sama?}
   V -- Tidak --> F
   V -- Ya --> G[Konfirmasi dan reservasi stok]
   G --> H{Produk wajib resep?}
@@ -43,11 +44,11 @@ Jika reservasi 30 menit habis sebelum pembayaran terkonfirmasi, pesanan berakhir
 |---|---|---|
 | 1 | Beranda/katalog | Cari, pilih kategori, dan lihat indikasi resep. |
 | 2 | Detail produk | Lihat informasi produk, harga indikatif, dan tambahkan jumlah. |
-| 3 | Keranjang | Ubah jumlah, hapus item, pilih metode; masukkan alamat untuk pengiriman atau pilih apotek untuk pengambilan. |
-| 4 | Konfirmasi | Pilih pengiriman/ambil, tinjau apotek dan rincian biaya, buat pesanan. |
+| 3 | Keranjang | Ubah jumlah, hapus item, pilih metode; masukkan alamat untuk pengiriman. Sistem menampilkan apotek yang dapat memenuhi pesanan. |
+| 4 | Konfirmasi | Pilih pengiriman/ambil, pilih apotek dari daftar yang memenuhi stok dan alamat, tinjau rincian biaya, buat pesanan. |
 | 5 | Resep bila perlu | Unggah dokumen, lihat status, jawab permintaan klarifikasi. |
 | 6 | Pembayaran | Lihat metode, nominal, dan batas waktu tagihan. |
-| 7 | Detail pesanan | Lihat status resep, pembayaran, penyiapan, pengiriman, dan bantuan. |
+| 7 | Detail pesanan | Lihat status resep, pembayaran, penyiapan, timeline resi kurir yang disinkronkan worker setiap 10 menit dan dapat diperbarui dari detail pesanan, serta bantuan. |
 | 8 | Riwayat | Buka pesanan terdahulu dan status refund jika ada. |
 
 Login/registrasi muncul sebelum pesanan dibuat; pengguna dapat menjelajah katalog tanpa login. Validasi alamat pengiriman jika diperlukan dan pemilihan apotek dilakukan sebelum konfirmasi. Untuk pesanan wajib resep, jam layanan pemeriksaan dan batas reservasi ditampilkan; pesanan tidak dapat dibuat di luar jam pemeriksaan resep apotek.

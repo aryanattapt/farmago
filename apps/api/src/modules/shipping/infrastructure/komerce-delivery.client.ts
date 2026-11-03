@@ -55,6 +55,36 @@ export class KomerceDeliveryClient {
     return { awb: safeText(row?.awb, 120) || null }
   }
 
+  async getAirwayBillHistory(shipping: string, airwayBill: string) {
+    const url = new URL(
+      '/order/api/v1/orders/history-airway-bill',
+      ensureBase(this.requireConfig().baseUrl),
+    )
+    url.searchParams.set('shipping', shipping)
+    url.searchParams.set('airway_bill', airwayBill)
+    const response = await this.requestUrl(url, { method: 'GET' })
+    if (!isProviderSuccess(response)) throw rejectionOrUnknown(response)
+
+    const data = response?.data ?? {}
+    const returnedAirwayBill = safeText(data.airway_bill, 120)
+    if (returnedAirwayBill && returnedAirwayBill !== airwayBill)
+      throw unknown('Komerce mengembalikan riwayat untuk nomor resi yang berbeda.')
+    const history = Array.isArray(data.history)
+      ? data.history.slice(0, 100).map((event: any) => ({
+          date: safeText(event?.date, 40),
+          code: safeText(event?.code, 80),
+          status: safeText(event?.status, 160),
+          description: safeText(event?.desc, 500),
+        }))
+      : []
+
+    return {
+      airwayBill: returnedAirwayBill || airwayBill,
+      lastStatus: safeText(data.last_status, 160) || (history.length ? history[history.length - 1].status : null),
+      history,
+    }
+  }
+
   async printLabel(orderNo: string, page = 'page_5') {
     const url = new URL('/order/api/v1/orders/print-label', ensureBase(this.requireConfig().baseUrl))
     url.searchParams.set('page', page)

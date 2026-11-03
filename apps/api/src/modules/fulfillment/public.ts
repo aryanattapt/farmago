@@ -3,6 +3,7 @@ import {
   createShipmentBooking,
   executeFulfillmentCommand,
   getShipmentLabel,
+  getShipmentTracking,
   requestShipmentPickup,
 } from './application/fulfillment.service'
 import { PostgresFulfillmentRepository } from './infrastructure/fulfillment.repository'
@@ -20,3 +21,8 @@ export const scheduleShipmentPickup = (...args: Parameters<typeof requestShipmen
   requestShipmentPickup(repository, ...args)
 export const downloadShipmentLabel = (...args: Parameters<typeof getShipmentLabel>) =>
   getShipmentLabel(repository, ...args)
+
+export const fetchCustomerShipmentTracking = (...args: Parameters<typeof getShipmentTracking>) =>
+  getShipmentTracking(repository, ...args)
+
+export const syncPendingShipmentTracking = () => repository.syncPendingShipmentTracking()

@@ -13,6 +13,7 @@ export interface FulfillmentRepository {
   createCheck(orderId: string, actor: User, input: FulfillmentCheckRequestDto): Promise<unknown>
   createShipmentBooking(orderId: string, actor: User): Promise<unknown>
   requestShipmentPickup(orderId: string, actor: User, input: { pickupDate?: unknown; pickupTime?: unknown; pickupVehicle?: unknown }): Promise<unknown>
+  getShipmentTracking(orderId: string, customerId: string): Promise<unknown>
   getShipmentLabel(orderId: string, actor: User): Promise<{ base64: string }>
 }
 
@@ -57,4 +58,8 @@ export function getShipmentLabel(
   actor: User,
 ) {
   return repository.getShipmentLabel(orderId, actor)
+}
+
+export function getShipmentTracking(repository: FulfillmentRepository, orderId: string, customerId: string) {
+  return repository.getShipmentTracking(orderId, customerId)
 }
