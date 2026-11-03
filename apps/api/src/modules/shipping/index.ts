@@ -1,6 +1,7 @@
 export { handleShippingRoutes } from './presentation/http/routes'
 export {
   calculateLowestShippingOption,
+  calculateShippingOptions,
   packageWeightGrams,
   searchShippingDestinations,
   sameShippingSnapshot,
