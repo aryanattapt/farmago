@@ -80,7 +80,7 @@ API JSON menggunakan `/api/v1`, validasi input, otorisasi per sumber daya, dan r
 
 - TLS, enkripsi database dan object storage, pengelolaan kunci dan secret di layanan secret terpisah.
 - File resep dipisahkan dari aset publik; akses berumur pendek atau melalui proxy terotorisasi, dengan audit akses.
-- Informasi minimum pada notifikasi, log, dan payload kurir. Pisahkan data pelanggan dari akses administratif yang tidak memerlukannya.
+- Informasi minimum pada notifikasi, log, dan payload kurir. Data rekening dan video unboxing hanya tersedia untuk pelanggan serta apotek yang ditugaskan; retensi dan penghapusan mengikuti kebijakan privasi. Pisahkan data pelanggan dari akses administratif yang tidak memerlukannya.
 - Uji kontrol akses, unggah file, validasi webhook, rate limiting, dependensi, dan pemulihan data.
 - Retensi, hak subjek data, lokasi penyimpanan, dan prosedur insiden ditentukan bersama tim hukum; tidak mengasumsikan persetujuan sebagai satu-satunya dasar pemrosesan.
 
@@ -117,7 +117,7 @@ Pengambilan oleh pelanggan atau kurir dan keputusan pembatalan mengunci pesanan 
 
 Event penyedia dapat tiba tidak berurutan. Status pembayaran yang telah terverifikasi menerima dana (`succeeded`/`late`) tidak boleh diturunkan oleh event `pending`, `failed`, atau `expired`; kasus konflik direkonsiliasi ke penyedia. Verifikasi juga mata uang IDR, nominal tepat, referensi merchant dan pesanan. Selisih nominal atau pembayaran tambahan membuka kasus rekonsiliasi dan tidak menambah hak pemenuhan; pesanan hanya boleh dibayar untuk pemenuhan sekali.
 
-Refund mempunyai `merchant_reference` unik. `requested` atau `processing` yang hasilnya belum pasti tetap menahan kuota refund. Time-out tidak boleh menjadi `failed`; periksa status penyedia dengan referensi sama. Hanya kegagalan definitif melepaskan kuota, dan retry permintaan eksternal selalu menggunakan referensi/idempotensi yang sama. Seluruh perubahan saldo refund dan pembayaran dikunci konsisten dalam transaksi singkat.
+Refund mempunyai `merchant_reference` unik. `requested` atau `processing` yang hasilnya belum pasti tetap menahan kuota refund. Time-out tidak boleh menjadi `failed`; periksa status penyedia dengan referensi sama. Hanya kegagalan definitif melepaskan kuota, dan retry permintaan eksternal selalu menggunakan referensi/idempotensi yang sama. Seluruh perubahan saldo refund dan pembayaran dikunci konsisten dalam transaksi singkat. Pengajuan refund pascapenerimaan masuk maksimal 72 jam sejak waktu diterima tercatat; video unboxing wajib untuk pesanan kurir. Data rekening dan video hanya dapat dibaca pelanggan serta apotek yang ditugaskan. Apotek mencatat keputusan, nominal yang tidak melebihi sisa dana diterima, dan referensi transfer manual; tenggat transfer maksimal 7 hari sejak persetujuan. Pesanan tetap `completed` dan stok tidak kembali otomatis.
 
 ### Kurir, notifikasi dan bukti
 

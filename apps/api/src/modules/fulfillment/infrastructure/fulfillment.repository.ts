@@ -870,6 +870,7 @@ async function persistKomerceTrackingUpdate(
       return true
     }
     const lifecycle = mapKomerceShipmentStatus(lastStatus)
+    const deliveredAt = lifecycle === 'delivered' ? deliveredAtFromHistory(history) : null
     const reason = lastStatus ? `Komerce: ${lastStatus}`.slice(0, 200) : 'Status Komerce'
 
     if (lifecycle === 'in_delivery') {
@@ -908,7 +909,8 @@ async function persistKomerceTrackingUpdate(
         tracking_status=COALESCE($3,tracking_status),tracking_history=$4::jsonb,tracking_checked_at=now(),
         tracking_attempted_at=now(),status=$5,
         handed_over_at=CASE WHEN $6::boolean THEN COALESCE(handed_over_at,now()) ELSE handed_over_at END,
-        handover_reference=CASE WHEN $7::text IS NULL THEN handover_reference ELSE COALESCE(handover_reference,$7) END
+        handover_reference=CASE WHEN $7::text IS NULL THEN handover_reference ELSE COALESCE(handover_reference,$7) END,
+        delivered_at=CASE WHEN $8::timestamptz IS NULL THEN delivered_at ELSE COALESCE(delivered_at,$8::timestamptz) END
       WHERE id=$1`,
       [
         order.shipment_id,
@@ -918,6 +920,7 @@ async function persistKomerceTrackingUpdate(
         shipmentStatus,
         inferredHandover,
         inferredHandover ? airwayBill : null,
+        deliveredAt,
       ],
     )
     if (statusChanged || orderChanged) {
@@ -938,6 +941,15 @@ async function persistKomerceTrackingUpdate(
       duplicate: !statusChanged && !orderChanged,
     }
   })
+}
+
+function deliveredAtFromHistory(history: unknown[]) {
+  const events = Array.isArray(history) ? history : []
+  const event = [...events]
+    .reverse()
+    .find((entry: any) => mapKomerceShipmentStatus(entry?.status) === 'delivered')
+  const timestamp = event ? Date.parse(String((event as any).date ?? '')) : Number.NaN
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : new Date().toISOString()
 }
 
 function trackingCourier(value: unknown) {

@@ -1,4 +1,9 @@
+import { randomUUID } from 'node:crypto'
+import { mkdir, unlink } from 'node:fs/promises'
+import { join } from 'node:path'
 import { desc, eq } from 'drizzle-orm'
+import { ApplicationError } from '../../../shared/application-error'
+import { canAccessPharmacy, type User } from '../../../shared/domain/access'
 import { db, transaction } from '../../../infrastructure/database/client'
 import { orders, supportCases } from '../../../infrastructure/database/schema'
 import { recordAudit } from '../../platform'
@@ -8,7 +13,7 @@ import type {
   CreateSupportCaseDto,
   UpdateSupportCaseDto,
 } from '../application/support.dto'
-import type { SupportRepository } from '../application/support.service'
+import type { ReturnRefundSubmission, SupportRepository, ValidatedReturnRefundDecision } from '../application/support.service'
 
 export class PostgresSupportRepository implements SupportRepository {
   requestCancellation(orderId: string, actorId: string, reason: string, canModerate: boolean) {
@@ -102,6 +107,355 @@ export class PostgresSupportRepository implements SupportRepository {
         },
       )
       return { ok: true, value: { id: requestId, status } }
+    })
+  }
+
+  async submitReturnRefundRequest(
+    orderId: string,
+    actor: User,
+    input: ReturnRefundSubmission,
+  ) {
+    let savedFile: string | null = null
+    try {
+      return await transaction(async (client) => {
+        const selected = await client.query(
+          `SELECT o.id,o.customer_id,o.status,o.fulfillment_method,s.status AS shipment_status,
+            s.delivered_at,
+            (SELECT h.created_at FROM order_status_history h
+             WHERE h.order_id=o.id AND h.to_status='completed'
+             ORDER BY h.created_at DESC LIMIT 1) AS completed_at
+          FROM orders o LEFT JOIN shipments s ON s.order_id=o.id
+          WHERE o.id=$1 FOR UPDATE OF o`,
+          [orderId],
+        )
+        if (!selected.rowCount)
+          throw new ApplicationError(404, 'NOT_FOUND', 'Pesanan tidak ditemukan.')
+        const order = selected.rows[0]
+        if (order.customer_id !== actor.id)
+          throw new ApplicationError(403, 'FORBIDDEN', 'Pesanan ini bukan milik Anda.')
+        if (order.status !== 'completed')
+          throw new ApplicationError(
+            409,
+            'RETURN_REQUEST_NOT_ALLOWED',
+            'Pengajuan refund hanya dapat dibuat setelah barang diterima.',
+          )
+        const receivedAt =
+          order.fulfillment_method === 'delivery' && order.shipment_status === 'delivered'
+            ? order.delivered_at
+            : order.fulfillment_method === 'pickup'
+              ? order.completed_at
+              : null
+        if (!receivedAt)
+          throw new ApplicationError(
+            409,
+            'RECEIPT_TIME_UNAVAILABLE',
+            'Waktu penerimaan barang belum tercatat. Hubungi bantuan.',
+          )
+        const receivedDate = new Date(receivedAt)
+        const eligibleUntil = new Date(receivedDate.getTime() + 3 * 24 * 60 * 60 * 1000)
+        if (Date.now() > eligibleUntil.getTime())
+          throw new ApplicationError(
+            409,
+            'RETURN_WINDOW_EXPIRED',
+            'Pengajuan hanya dapat dikirim dalam 3 hari sejak barang diterima.',
+          )
+        if (order.fulfillment_method === 'delivery' && !input.evidence)
+          throw new ApplicationError(
+            400,
+            'RETURN_EVIDENCE_REQUIRED',
+            'Video unboxing wajib diunggah untuk pesanan yang dikirim kurir.',
+          )
+
+        const existing = await client.query(
+          'SELECT id,status FROM return_refund_requests WHERE order_id=$1 ORDER BY created_at DESC LIMIT 1',
+          [orderId],
+        )
+        if (existing.rowCount && existing.rows[0].status !== 'rejected') {
+          return {
+            id: existing.rows[0].id,
+            status: existing.rows[0].status,
+            duplicate: true,
+          }
+        }
+
+        const requestId = randomUUID()
+        let objectKey: string | null = null
+        if (input.evidence) {
+          objectKey = `${orderId}/${requestId}${input.evidence.extension}`
+          const filePath = join(
+            process.cwd(),
+            'storage',
+            'return-refund-evidence',
+            objectKey,
+          )
+          await mkdir(join(process.cwd(), 'storage', 'return-refund-evidence', orderId), {
+            recursive: true,
+          })
+          savedFile = filePath
+          await Bun.write(filePath, input.evidence.data)
+        }
+        const saved = await client.query(
+          `INSERT INTO return_refund_requests(
+            id,order_id,requested_by,reason,bank_name,account_holder_name,account_number,
+            video_object_key,video_mime_type,received_at,eligible_until
+          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+          RETURNING id,status,created_at AS requested_at,eligible_until`,
+          [
+            requestId,
+            orderId,
+            actor.id,
+            input.reason,
+            input.bankName,
+            input.accountHolderName,
+            input.accountNumber,
+            objectKey,
+            input.evidence?.mimeType ?? null,
+            receivedDate,
+            eligibleUntil,
+          ],
+        )
+        await recordAudit(client, actor.id, 'return_refund.requested', 'return_refund_request', requestId, {
+          orderId,
+          hasEvidence: Boolean(objectKey),
+        })
+        return { ...saved.rows[0], duplicate: false }
+      })
+    } catch (error) {
+      if (savedFile) await unlink(savedFile).catch(() => {})
+      throw error
+    }
+  }
+
+  async getReturnRefundRequest(orderId: string, actor: User) {
+    return transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT o.id,o.customer_id,o.status,o.fulfillment_method,s.status AS shipment_status,
+          s.delivered_at,
+          (SELECT h.created_at FROM order_status_history h
+           WHERE h.order_id=o.id AND h.to_status='completed'
+           ORDER BY h.created_at DESC LIMIT 1) AS completed_at
+        FROM orders o LEFT JOIN shipments s ON s.order_id=o.id
+        WHERE o.id=$1`,
+        [orderId],
+      )
+      if (!selected.rowCount)
+        throw new ApplicationError(404, 'NOT_FOUND', 'Pesanan tidak ditemukan.')
+      const order = selected.rows[0]
+      if (order.customer_id !== actor.id)
+        throw new ApplicationError(403, 'FORBIDDEN', 'Pesanan ini bukan milik Anda.')
+      const receivedAt =
+        order.fulfillment_method === 'delivery' && order.shipment_status === 'delivered'
+          ? order.delivered_at
+          : order.fulfillment_method === 'pickup'
+            ? order.completed_at
+            : null
+      const eligibleUntil = receivedAt
+        ? new Date(new Date(receivedAt).getTime() + 3 * 24 * 60 * 60 * 1000)
+        : null
+      const request = await client.query(
+        `SELECT id,status,reason,decision_reason,refund_amount,refund_due_at,refunded_at,
+          transfer_reference,created_at AS requested_at,decided_at FROM return_refund_requests
+         WHERE order_id=$1 ORDER BY created_at DESC LIMIT 1`,
+        [orderId],
+      )
+      const rawRequest = request.rows[0] ?? null
+      const existing = rawRequest
+        ? {
+            id: rawRequest.id,
+            status: rawRequest.status,
+            reason: rawRequest.reason,
+            decisionReason: rawRequest.decision_reason,
+            refundAmount: rawRequest.refund_amount,
+            refundDueAt: rawRequest.refund_due_at,
+            refundedAt: rawRequest.refunded_at,
+            transferReference: rawRequest.transfer_reference,
+            requestedAt: rawRequest.requested_at,
+            decidedAt: rawRequest.decided_at,
+          }
+        : null
+      return {
+        request: existing,
+        receivedAt,
+        eligibleUntil,
+        requiresVideo: order.fulfillment_method === 'delivery',
+        eligible: Boolean(
+          receivedAt &&
+            eligibleUntil &&
+            Date.now() <= eligibleUntil.getTime() &&
+            order.status === 'completed' &&
+            (!existing || existing.status === 'rejected'),
+        ),
+      }
+    })
+  }
+
+  async listReturnRefundRequests(actor: User) {
+    const pharmacyIds = actor.roles
+      .filter((entry) => ['pharmacist', 'pharmacy_staff'].includes(entry.role))
+      .map((entry) => entry.pharmacyId)
+      .filter((id): id is string => Boolean(id))
+    if (pharmacyIds.length === 0)
+      throw new ApplicationError(403, 'PHARMACY_SCOPE_REQUIRED', 'Penugasan apotek diperlukan.')
+    return transaction(async (client) => {
+      const result = await client.query(
+        `SELECT r.id,r.order_id,r.status,r.reason,r.bank_name,r.account_holder_name,
+          r.account_number,r.video_object_key,r.video_mime_type,r.refund_amount,r.refund_due_at,
+          r.decision_reason,r.received_at,r.eligible_until,r.created_at AS requested_at,r.decided_at,r.refunded_at,r.transfer_reference,
+          o.pharmacy_id,o.total,o.fulfillment_method,u.name AS customer_name,
+          p.received_amount
+        FROM return_refund_requests r
+        JOIN orders o ON o.id=r.order_id
+        JOIN users u ON u.id=r.requested_by
+        LEFT JOIN LATERAL (
+          SELECT received_amount FROM payments WHERE order_id=o.id
+          ORDER BY created_at DESC LIMIT 1
+        ) p ON true
+        WHERE o.pharmacy_id=ANY($1::uuid[])
+          AND r.status IN ('requested','approved')
+        ORDER BY r.created_at ASC`,
+        [pharmacyIds],
+      )
+      for (const row of result.rows)
+        await recordAudit(client, actor.id, 'return_refund.details_viewed', 'return_refund_request', row.id, { orderId: row.order_id })
+      return result.rows
+    })
+  }
+
+  async recordReturnRefundEvidenceViewed(requestId: string, actorId: string) {
+    await transaction(async (client) => {
+      await recordAudit(client, actorId, 'return_refund.evidence_viewed', 'return_refund_request', requestId, {})
+    })
+  }
+
+  async findReturnRefundEvidence(requestId: string) {
+    const result = await transaction(async (client) =>
+      client.query(
+        `SELECT r.video_object_key AS object_key,r.video_mime_type AS mime_type,
+          o.customer_id,o.pharmacy_id
+        FROM return_refund_requests r JOIN orders o ON o.id=r.order_id
+        WHERE r.id=$1 AND r.video_object_key IS NOT NULL`,
+        [requestId],
+      ),
+    )
+    if (!result.rowCount) return null
+    return {
+      customerId: result.rows[0].customer_id,
+      pharmacyId: result.rows[0].pharmacy_id,
+      objectKey: result.rows[0].object_key,
+      mimeType: result.rows[0].mime_type,
+    }
+  }
+
+  async decideReturnRefundRequest(
+    requestId: string,
+    actor: User,
+    input: ValidatedReturnRefundDecision,
+  ) {
+    return transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT r.*,o.pharmacy_id,o.status AS order_status
+        FROM return_refund_requests r JOIN orders o ON o.id=r.order_id
+        WHERE r.id=$1 FOR UPDATE OF r,o`,
+        [requestId],
+      )
+      if (!selected.rowCount)
+        throw new ApplicationError(404, 'NOT_FOUND', 'Pengajuan refund tidak ditemukan.')
+      const request = selected.rows[0]
+      if (!canAccessPharmacy(actor, request.pharmacy_id))
+        throw new ApplicationError(403, 'PHARMACY_SCOPE_REQUIRED', 'Akses apotek ini tidak diizinkan.')
+      if (request.status !== 'requested')
+        throw new ApplicationError(409, 'ALREADY_DECIDED', 'Pengajuan refund sudah diputuskan.')
+      if (request.order_status !== 'completed')
+        throw new ApplicationError(409, 'ORDER_NOT_COMPLETED', 'Pesanan yang diterima harus tetap berstatus selesai.')
+      const rejected = input.decision === 'rejected'
+      if (rejected) {
+        await client.query(
+          `UPDATE return_refund_requests SET status='rejected',decided_by=$2,
+            decision_reason=$3,decided_at=now() WHERE id=$1`,
+          [requestId, actor.id, input.reason],
+        )
+        await recordAudit(client, actor.id, 'return_refund.rejected', 'return_refund_request', requestId, {
+          orderId: request.order_id,
+        })
+        return { id: requestId, status: 'rejected', decisionReason: input.reason }
+      }
+
+      const paymentResult = await client.query(
+        `SELECT id,received_amount FROM payments
+        WHERE order_id=$1 AND status IN ('succeeded','late') AND received_amount IS NOT NULL
+        ORDER BY confirmed_at DESC NULLS LAST,created_at DESC LIMIT 1 FOR UPDATE`,
+        [request.order_id],
+      )
+      if (!paymentResult.rowCount)
+        throw new ApplicationError(409, 'PAYMENT_NOT_RECEIVED', 'Dana pembayaran terverifikasi belum tersedia.')
+      const payment = paymentResult.rows[0]
+      const capacity = await client.query(
+        `SELECT $1::numeric <= $2::numeric - COALESCE(
+          (SELECT SUM(amount) FROM refunds
+           WHERE payment_id=$3 AND status IN ('requested','processing','succeeded')),0
+        ) AS allowed`,
+        [input.refundAmount, payment.received_amount, payment.id],
+      )
+      if (!capacity.rows[0].allowed)
+        throw new ApplicationError(409, 'REFUND_LIMIT_EXCEEDED', 'Nominal refund melebihi sisa dana yang diterima.')
+      const merchantReference = `manual-return-${requestId}`
+      const refund = await client.query(
+        `INSERT INTO refunds(payment_id,merchant_reference,amount,reason,status,requested_by)
+         VALUES($1,$2,$3,$4,'requested',$5) RETURNING id`,
+        [payment.id, merchantReference, input.refundAmount, input.reason || request.reason, actor.id],
+      )
+      const updatedRequest = await client.query(
+        `UPDATE return_refund_requests SET status='approved',decided_by=$2,
+          decision_reason=$3,refund_id=$4,refund_amount=$5,decided_at=now(),
+          refund_due_at=now()+interval '7 days' WHERE id=$1 RETURNING refund_due_at`,
+        [requestId, actor.id, input.reason || null, refund.rows[0].id, input.refundAmount],
+      )
+      await recordAudit(client, actor.id, 'return_refund.approved', 'return_refund_request', requestId, {
+        orderId: request.order_id,
+        refundId: refund.rows[0].id,
+        dueInDays: 7,
+      })
+      return {
+        id: requestId,
+        status: 'approved',
+        refundAmount: input.refundAmount,
+        refundDueAt: updatedRequest.rows[0].refund_due_at,
+      }
+    })
+  }
+
+  async markManualRefund(requestId: string, actor: User, transferReference: string) {
+    return transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT r.status,r.refund_id,r.order_id,o.pharmacy_id
+        FROM return_refund_requests r JOIN orders o ON o.id=r.order_id
+        WHERE r.id=$1 FOR UPDATE OF r,o`,
+        [requestId],
+      )
+      if (!selected.rowCount)
+        throw new ApplicationError(404, 'NOT_FOUND', 'Pengajuan refund tidak ditemukan.')
+      const request = selected.rows[0]
+      if (!canAccessPharmacy(actor, request.pharmacy_id))
+        throw new ApplicationError(403, 'PHARMACY_SCOPE_REQUIRED', 'Akses apotek ini tidak diizinkan.')
+      if (request.status !== 'approved' || !request.refund_id)
+        throw new ApplicationError(409, 'REFUND_NOT_APPROVED', 'Pengajuan refund belum disetujui.')
+      const refund = await client.query(
+        `UPDATE refunds SET status='succeeded',provider_reference=$2
+        WHERE id=$1 AND status IN ('requested','processing') RETURNING id`,
+        [request.refund_id, transferReference],
+      )
+      if (!refund.rowCount)
+        throw new ApplicationError(409, 'REFUND_ALREADY_COMPLETED', 'Refund sudah ditandai selesai.')
+      await client.query(
+        `UPDATE return_refund_requests SET status='refunded',refunded_at=now(),
+          transfer_reference=$2 WHERE id=$1`,
+        [requestId, transferReference],
+      )
+      await recordAudit(client, actor.id, 'return_refund.manual_transfer_recorded', 'return_refund_request', requestId, {
+        orderId: request.order_id,
+        refundId: request.refund_id,
+      })
+      return { id: requestId, status: 'refunded', transferReference }
     })
   }
 

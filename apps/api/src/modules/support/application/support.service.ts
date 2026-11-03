@@ -1,16 +1,55 @@
+import { join } from 'node:path'
+import { RETURN_EVIDENCE_MAX_BYTES } from '../../../shared/config'
 import { ApplicationError } from '../../../shared/application-error'
 import { canAccessPharmacy, hasRole, type User } from '../../../shared/domain/access'
 import type {
   CancellationDecisionDto,
+  ManualRefundCompletionDto,
+  ReturnRefundDecisionDto,
+  ReturnRefundRequestDto,
   CancellationRequestDto,
   CreateSupportCaseDto,
   UpdateSupportCaseDto,
 } from './support.dto'
 
+export type ReturnRefundSubmission = ReturnRefundRequestDto & {
+  accountNumber: string
+  accountHolderName: string
+  bankName: string
+  reason: string
+  evidence: { data: Buffer; extension: string; mimeType: string } | null
+}
+
+export type ValidatedReturnRefundDecision = {
+  decision: 'approved' | 'rejected'
+  reason: string
+  refundAmount: string | null
+}
+
 export type SupportResult<T, Reason extends string> =
   { ok: true; value: T } | { ok: false; reason: Reason }
 
 export interface SupportRepository {
+  submitReturnRefundRequest(
+    orderId: string,
+    actor: User,
+    input: ReturnRefundSubmission,
+  ): Promise<unknown>
+  getReturnRefundRequest(orderId: string, actor: User): Promise<unknown>
+  listReturnRefundRequests(actor: User): Promise<unknown[]>
+  recordReturnRefundEvidenceViewed(requestId: string, actorId: string): Promise<void>
+  findReturnRefundEvidence(requestId: string): Promise<{
+    customerId: string
+    pharmacyId: string
+    objectKey: string
+    mimeType: string
+  } | null>
+  decideReturnRefundRequest(
+    requestId: string,
+    actor: User,
+    input: ValidatedReturnRefundDecision,
+  ): Promise<unknown>
+  markManualRefund(requestId: string, actor: User, transferReference: string): Promise<unknown>
   requestCancellation(
     orderId: string,
     actorId: string,
@@ -148,4 +187,125 @@ export async function updateSupportCase(
 
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+
+export async function submitOrderReturnRefund(
+  repository: SupportRepository,
+  orderId: string,
+  user: User,
+  input: ReturnRefundRequestDto,
+  evidence: { data: Buffer; filename: string; mimeType: string } | null,
+) {
+  const reason = String(input.reason ?? '').trim()
+  const bankName = String(input.bankName ?? '').trim()
+  const accountHolderName = String(input.accountHolderName ?? '').trim()
+  const accountNumber = String(input.accountNumber ?? '').replace(/[\s-]/g, '')
+  if (reason.length < 3 || reason.length > 1000)
+    throw new ApplicationError(400, 'INVALID_REASON', 'Alasan pengajuan wajib diisi (3–1.000 karakter).')
+  if (bankName.length < 2 || bankName.length > 100)
+    throw new ApplicationError(400, 'INVALID_BANK', 'Nama bank wajib diisi.')
+  if (accountHolderName.length < 2 || accountHolderName.length > 120)
+    throw new ApplicationError(400, 'INVALID_ACCOUNT_NAME', 'Nama pemilik rekening wajib diisi.')
+  if (!/^\d{6,32}$/.test(accountNumber))
+    throw new ApplicationError(400, 'INVALID_ACCOUNT_NUMBER', 'Nomor rekening harus berisi 6–32 digit.')
+
+  const validatedEvidence = evidence ? validateReturnEvidence(evidence) : null
+  return repository.submitReturnRefundRequest(orderId, user, {
+    reason,
+    bankName,
+    accountHolderName,
+    accountNumber,
+    evidence: validatedEvidence,
+  })
+}
+
+function validateReturnEvidence(file: { data: Buffer; filename: string; mimeType: string }) {
+  if (!file.data.length || file.data.length > RETURN_EVIDENCE_MAX_BYTES)
+    throw new ApplicationError(413, 'RETURN_EVIDENCE_TOO_LARGE', 'Video melebihi batas ukuran yang diizinkan.')
+  const mimeType = String(file.mimeType ?? '').toLowerCase()
+  const formats = {
+    'video/mp4': { extension: '.mp4', matches: (data: Buffer) => data.length >= 12 && data.subarray(4, 8).toString() === 'ftyp' },
+    'video/webm': { extension: '.webm', matches: (data: Buffer) => data.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])) },
+  } as const
+  const format = formats[mimeType as keyof typeof formats]
+  if (!format)
+    throw new ApplicationError(400, 'RETURN_EVIDENCE_TYPE_NOT_ALLOWED', 'Format video yang didukung: MP4 atau WebM.')
+  if (!format.matches(file.data))
+    throw new ApplicationError(400, 'INVALID_RETURN_EVIDENCE', 'Isi video tidak sesuai dengan formatnya.')
+  return { data: file.data, extension: format.extension, mimeType }
+}
+
+export async function getOrderReturnRefundRequest(
+  repository: SupportRepository,
+  orderId: string,
+  user: User,
+) {
+  return repository.getReturnRefundRequest(orderId, user)
+}
+
+export async function listPharmacyReturnRefundRequests(
+  repository: SupportRepository,
+  user: User,
+) {
+  if (!hasRole(user, 'pharmacist', 'pharmacy_staff'))
+    throw new ApplicationError(403, 'FORBIDDEN', 'Akses apotek ini tidak diizinkan.')
+  return repository.listReturnRefundRequests(user)
+}
+
+export async function readReturnRefundEvidence(
+  repository: SupportRepository,
+  requestId: string,
+  user: User,
+) {
+  const evidence = await repository.findReturnRefundEvidence(requestId)
+  if (!evidence) throw new ApplicationError(404, 'NOT_FOUND', 'Video bukti tidak ditemukan.')
+  if (evidence.customerId !== user.id && (!hasRole(user, 'pharmacist', 'pharmacy_staff') || !canAccessPharmacy(user, evidence.pharmacyId)))
+    throw new ApplicationError(403, 'FORBIDDEN', 'Akses video bukti tidak diizinkan.')
+  const filePath = join(process.cwd(), 'storage', 'return-refund-evidence', evidence.objectKey)
+  if (!(await Bun.file(filePath).exists()))
+    throw new ApplicationError(404, 'FILE_MISSING', 'Video bukti tidak tersedia.')
+  await repository.recordReturnRefundEvidenceViewed(requestId, user.id)
+  return { filePath, mimeType: evidence.mimeType }
+}
+
+export async function decidePharmacyReturnRefund(
+  repository: SupportRepository,
+  requestId: string,
+  user: User,
+  input: ReturnRefundDecisionDto,
+) {
+  if (!hasRole(user, 'pharmacist', 'pharmacy_staff'))
+    throw new ApplicationError(403, 'FORBIDDEN', 'Keputusan hanya dapat dilakukan petugas apotek.')
+  if (!['approved', 'rejected'].includes(String(input.decision)))
+    throw new ApplicationError(400, 'INVALID_DECISION', 'Keputusan tidak valid.')
+  const reason = String(input.reason ?? '').trim()
+  if (input.decision === 'rejected' && (reason.length < 3 || reason.length > 500))
+    throw new ApplicationError(400, 'DECISION_REASON_REQUIRED', 'Alasan penolakan wajib diisi.')
+  let refundAmount: string | null = null
+  if (input.decision === 'approved') {
+    const amount = Number(input.refundAmount)
+    if (!Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(Math.round(amount * 100)))
+      throw new ApplicationError(400, 'INVALID_REFUND_AMOUNT', 'Nominal refund harus lebih besar dari nol.')
+    refundAmount = amount.toFixed(2)
+  }
+  return repository.decideReturnRefundRequest(requestId, user, {
+    decision: input.decision as 'approved' | 'rejected',
+    reason,
+    refundAmount,
+  })
+}
+
+export async function completeManualReturnRefund(
+  repository: SupportRepository,
+  requestId: string,
+  user: User,
+  input: ManualRefundCompletionDto,
+) {
+  if (!hasRole(user, 'pharmacist', 'pharmacy_staff'))
+    throw new ApplicationError(403, 'FORBIDDEN', 'Penyelesaian refund hanya dapat dilakukan petugas apotek.')
+  const transferReference = String(input.transferReference ?? '').trim()
+  if (transferReference.length < 3 || transferReference.length > 120)
+    throw new ApplicationError(400, 'TRANSFER_REFERENCE_REQUIRED', 'Referensi transfer wajib diisi.')
+  return repository.markManualRefund(requestId, user, transferReference)
 }

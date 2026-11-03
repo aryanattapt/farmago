@@ -11,17 +11,17 @@ Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sud
 - Katalog produk, pencarian dan kategori, keranjang, akun pelanggan, sesi, alamat, checkout ambil di apotek, riwayat dan detail pesanan.
 - Quote menyimpan snapshot item dan harga. API memeriksa ulang harga dan stok saat pesanan dibuat, membuat reservasi stok dalam transaksi, dan mendukung kunci idempotensi.
 - Unggah resep privat pada penyimpanan lokal, antrean peninjauan apoteker, persetujuan/penolakan, permintaan klarifikasi, dan balasan pelanggan.
-- Panel apotek untuk antrean, koreksi alokasi stok daring, penyiapan dan pemeriksaan akhir, serta konfirmasi pengambilan dengan kode dan bukti.
+- Panel apotek untuk antrean, koreksi alokasi stok daring, penyiapan dan pemeriksaan akhir, konfirmasi pengambilan dengan kode dan bukti, serta peninjauan dan pencatatan transfer refund manual.
 - Pencatatan lot dan tanggal kedaluwarsa untuk produk yang memerlukannya. Jumlah lot harus sesuai pesanan; lot kedaluwarsa ditolak. Pemeriksaan gagal membuka kasus operasional untuk CS.
 - Panel admin/operasional untuk katalog, stok dan harga, onboarding/status apotek, pesanan, permintaan pembatalan, dan kasus bantuan.
 - Sesi cookie HttpOnly, proteksi CSRF, otorisasi berbasis peran dan penugasan apotek, MFA TOTP untuk akun internal, audit, serta pembatasan jenis dan ukuran unggahan resep.
-- Batas ukuran seluruh body request API mengikuti batas unggahan resep dan diterapkan sebelum parsing.
+- Batas ukuran body request API diterapkan sebelum parsing; ukuran maksimum mengikuti batas unggahan resep atau video unboxing, mana yang lebih besar.
 - Suite integration API berbasis PostgreSQL ditambahkan untuk reservasi/idempotensi stok, race pada stok terakhir, perubahan harga quote, otorisasi dan konkurensi review resep, serta pemenuhan pickup; CI menyiapkan database khusus dan menjalankan migrasi.
 - Bucket rate limit yang kedaluwarsa dibersihkan berkala agar memori API tidak terus tumbuh.
 - Temuan review awal diperbaiki: klasifikasi dan aktivasi katalog dibatasi ke apoteker; order mengunci status apotek saat dibuat; referensi bukti pickup tersimpan lewat migrasi; file resep dibersihkan jika transaksi gagal.
 - Registrasi dan verifikasi kontak berjalan dalam transaksi; email verifikasi pendaftaran serta reset kata sandi production dikirim lewat SMTP. Login membatasi kata sandi maksimum 128 karakter.
 - Checkout menampilkan daftar apotek yang memenuhi stok/alamat agar buyer memilih apotek sebelum rincian quote dibuat.
-- Detail order menampilkan status dan timeline AWB Komerce; worker API menyinkronkan maksimal 25 resi aktif setiap 10 menit. Status kurir dipetakan ke siklus pesanan, callback Komerce memakai token dan aman terhadap pengiriman ulang, serta kendala kurir membuka kasus bantuan.
+- Detail order menampilkan status dan timeline AWB Komerce; worker API menyinkronkan maksimal 25 resi aktif setiap 10 menit. Status kurir dipetakan ke siklus pesanan, callback Komerce memakai token dan aman terhadap pengiriman ulang, serta kendala kurir membuka kasus bantuan. Waktu penerimaan kurir dicatat untuk menghitung jendela pengajuan refund.
 - Validasi jam layanan menolak jam, tanggal, timezone, dan jadwal ganda yang tidak valid; seed menolak environment production.
 - Alur alamat pengiriman baru memakai alamat hasil simpan; panel katalog apoteker menampilkan kontrol buat dan aktivasi produk.
 - README menjelaskan cara menjalankan aplikasi dan batas kesiapan integrasi.
@@ -40,23 +40,23 @@ Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sud
 | PR-08 Pembayaran | Belum selesai | Adapter pembayaran dan webhook belum dipilih/dipasang; tagihan mengembalikan `503`. |
 | PR-09 Pemenuhan | Sebagian | Pemeriksaan, lot, booking/pickup, label, konfirmasi serah-terima dengan referensi bukti, status `in_delivery`, dan kasus saat kurir terkendala tersedia; konfigurasi serta UAT Komerce sandbox/production masih diperlukan. |
 | PR-10 Pelacakan | Sebagian | Polling dan webhook Komerce mengubah status pesanan (`in_delivery`/`completed`), menyimpan timeline, dan menghindari transisi ulang; webhook memerlukan token callback. Konfigurasi endpoint dan UAT provider sandbox/production masih diperlukan. |
-| PR-11 Pembatalan dan refund | Sebagian | Permintaan dan keputusan pembatalan tersedia; refund ke penyedia belum terhubung dan kebijakan final belum disetujui. |
+| PR-11 Pembatalan dan refund | Sebagian | Pembatalan sebelum serah-terima tetap tersedia. Form refund setelah penerimaan, video unboxing untuk kurir, data rekening terbatas ke apotek penugasan, keputusan apotek, serta pencatatan transfer manual maksimal 7 hari sudah diimplementasikan; integrasi pembayaran/refund provider, UAT, dan pengesahan SOP produk/legal masih tersisa. |
 | PR-12 Admin dan audit | Sebagian | Alur admin dan pencatatan tindakan tersedia; validasi peran, audit dan UAT masih perlu dilakukan. |
 
 ## Belum dikerjakan atau masih menunggu keputusan
 
-- Pilih serta integrasikan penyedia pembayaran, webhook pembayaran, rekonsiliasi, dan refund; konfigurasi URL webhook pengiriman dengan token `KOMERCE_DELIVERY_WEBHOOK_TOKEN`; validasi koneksi tarif/booking/pickup, label, tracking, status serah-terima dan kasus kurir dengan akun Komerce sandbox dan production.
-- Hubungkan penyedia SMS untuk verifikasi nomor telepon dan pemulihan akun; validasi deliverability SMTP di production.
-- Pindahkan berkas resep ke object storage privat dan tambahkan pemindaian malware.
+- Pilih serta integrasikan penyedia pembayaran, webhook pembayaran, dan rekonsiliasi; refund untuk kasus pembayaran selain transfer manual pascapenerimaan tetap memerlukan jalur operasional/provider. Konfigurasi URL webhook pengiriman dengan token `KOMERCE_DELIVERY_WEBHOOK_TOKEN`; validasi koneksi tarif/booking/pickup, label, tracking, status serah-terima dan kasus kurir dengan akun Komerce sandbox dan production.
+- Hubungkan penyedia SMS untuk verifikasi nomor telepon dan pemulihan akun; validasi deliverability SMTP di production. Tabel outbox tersedia pada skema, tetapi worker pengiriman dan retry notifikasi belum tersedia.
+- Pindahkan berkas resep dan video unboxing ke object storage privat serta tambahkan pemindaian malware.
 - Sahkan kebijakan refund, ongkir/biaya, retensi, izin, peran pemrosesan data, SOP resep, kategori produk, dan prosedur pilot.
 - Tentukan apotek/wilayah pilot dan buktikan pemisahan stok daring dari stok kasir atau siapkan integrasi POS.
 - Siapkan backup dan pemulihan, monitoring/alert, pelatihan operasional, serta runbook insiden.
-- Jalankan UAT 38 skenario di IPD, uji keamanan/unggahan, uji beban, dan verifikasi pemulihan. Suite integration PostgreSQL mencakup subset alur API dan bukan pengganti UAT.
+- Jalankan UAT 42 skenario di IPD, uji keamanan/unggahan, uji beban, dan verifikasi pemulihan. Suite integration PostgreSQL mencakup subset alur API dan bukan pengganti UAT.
 
 ## Keputusan terbuka pada `09-Review-Report.md`
 
 - **D-01–D-03:** model stok, waktu reservasi/jam layanan, serta kategori dan SOP farmasi.
-- **D-04–D-05:** penyedia pembayaran/kurir dan kebijakan refund/biaya.
+- **D-04–D-05:** penyedia pembayaran/kurir; kebijakan awal refund 3 hari dan transfer manual maksimal 7 hari telah ditentukan, tetapi kelayakan produk, nominal/cakupan ongkir, dan pengesahan bisnis/legal masih terbuka.
 - **D-06–D-07:** izin, privasi/retensi, wilayah pilot, anggaran, tim, SLA dan profil beban.
 
 ## Pemeriksaan yang sudah dilakukan
@@ -64,4 +64,4 @@ Dokumen ini mencatat kondisi kode saat ini. Status fitur tidak berarti fitur sud
 - Bundel API dan web berhasil dibuat dengan Bun setelah perbaikan review.
 - Pemeriksaan bundel tidak menjalankan migrasi pada PostgreSQL dan bukan bukti lulus UAT.
 
-- GitHub Actions run #17 lulus: API unit/architecture 68/68, web 38/38, PostgreSQL integration 5/5; migrasi 001–002 diterapkan dan build API/web berhasil. [Log run](https://github.com/aryanattapt/farmago/actions/runs/41378630523).
+- Baseline `main` sebelum perubahan PR-11 ini: [GitHub Actions run #72](https://github.com/aryanattapt/farmago/actions/runs/41583394150) lulus untuk tes API/web, build, migrasi, dan PostgreSQL integration. Perubahan cabang PR-11 belum diverifikasi CI.

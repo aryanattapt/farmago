@@ -145,3 +145,19 @@ a{color:inherit;text-decoration:none}
 .shipment-tracking-list li strong{color:#526057}
 .shipment-tracking-list li span{color:#748177;line-height:1.4}
 .shipment-tracking-list li small{color:#9aa39c}
+
+
+.return-refund-form{display:grid;gap:14px;margin-top:18px;padding:18px;border:1px solid #e4e8e5;border-radius:14px;background:#fbfcfb}
+.return-refund-heading,.return-refund-card-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.return-refund-heading{flex-direction:column}
+.return-refund-heading small,.return-refund-fields small,.return-refund-expired{color:#68746e}
+.return-refund-fields,.return-refund-actions{display:grid;gap:12px}
+.return-refund-fields label,.return-refund-actions label{display:grid;gap:6px}
+.return-refund-fields input,.return-refund-fields textarea,.return-refund-actions input{width:100%;box-sizing:border-box}
+.return-refund-panel{margin-bottom:20px}
+.return-refund-card{display:grid;gap:12px;padding:18px 0;border-top:1px solid #e4e8e5}
+.return-refund-card p{margin:0}
+.return-refund-bank{display:grid;gap:4px;padding:12px;border-radius:10px;background:#f3f6f4}
+.return-refund-actions{padding-top:8px}
+.notice-success{background:#edf8f0;color:#27643e}
+.return-refund-overdue{color:#a33a2c;font-weight:600}

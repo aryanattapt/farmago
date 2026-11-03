@@ -28,6 +28,9 @@ erDiagram
   ORDER_ITEMS ||--o{ REVIEW_ITEMS : assessed
   ORDERS ||--o{ PAYMENTS : billed
   PAYMENTS ||--o{ REFUNDS : refunded
+  ORDERS ||--o{ RETURN_REFUND_REQUESTS : requests
+  USERS ||--o{ RETURN_REFUND_REQUESTS : submits
+  REFUNDS ||--o| RETURN_REFUND_REQUESTS : fulfills
   ORDERS ||--o| SHIPMENTS : fulfilled
   ORDERS ||--o{ ORDER_STATUS_HISTORY : records
   ORDERS ||--o{ FULFILLMENT_CHECKS : checked
@@ -78,7 +81,8 @@ Kolom `id` adalah primary key kecuali tabel yang disebut memiliki kunci gabungan
 | `dispensed_lots` | `id`, `check_id` FK, `order_item_id` FK, `lot_number`, `expiry_date`, `quantity` | Dicatat untuk produk `batch_tracking_required`; jumlah lot per item sama dengan jumlah yang dipenuhi. Ini catatan lot yang dipilih petugas, bukan perhitungan otomatis stok per lot. |
 | `shipments` | `id`, `order_id` FK, `method`, `status`, `handed_over_at?`, `handover_actor_id?` FK, `handover_evidence_key?`, `delivered_at?`, `delivery_evidence_key?`, `created_at` | Satu pemenuhan logis per pesanan; metode `delivery`/`pickup`; status `pending`, `booking`, `booked`, `in_transit`, `delivered`, `exception`, `picked_up`. Bukti privat dan akses terbatas; pickup tidak menggunakan kurir. |
 | `shipment_attempts` | `id`, `shipment_id` FK, `merchant_reference`, `provider`, `provider_reference?`, `tracking_number?`, `status`, `created_at` | Referensi merchant unik; status `creating`, `booked`, `failed`, `cancelled`; hasil tidak pasti tetap `creating`. Satu percobaan aktif per pemenuhan; booking baru setelah kegagalan/pembatalan sebelumnya pasti. |
-| `cancellation_requests` | `id`, `order_id` FK, `requested_by` FK, `reason`, `status`, `decision_by?` FK, `decision_reason?`, `created_at`, `decided_at?` | Status `requested`, `approved`, `rejected`; hanya petugas berwenang memutuskan pembatalan setelah pembayaran. |
+| `cancellation_requests` | `id`, `order_id` FK, `requested_by` FK, `reason`, `status`, `decision_by?` FK, `decision_reason?`, `created_at`, `decided_at?` | Status `requested`, `approved`, `rejected`; hanya petugas berwenang memutuskan pembatalan sebelum serah-terima. |
+| `return_refund_requests` | `id`, `order_id` FK, `requested_by` FK, `reason`, `bank_name`, `account_holder_name`, `account_number`, `video_object_key?`, `received_at`, `eligible_until`, `status`, `refund_id?` FK, `refund_amount?`, `refund_due_at?`, `refunded_at?`, `transfer_reference?` | Satu pengajuan aktif/berhasil per pesanan; maksimal 72 jam dari penerimaan. Video wajib untuk pengiriman. Status `requested`, `approved`, `rejected`, `refunded`; transfer manual maksimal 7 hari setelah persetujuan. Akses rekening/video dibatasi ke pelanggan dan apotek penugasan. |
 | `support_cases` | `id`, `order_id` FK, `opened_by` FK, `type`, `status`, `summary`, `assigned_to?` FK, `created_at`, `closed_at?` | Menyimpan kendala operasional, termasuk pembayaran yang perlu rekonsiliasi dan pengiriman gagal; ringkasan tidak memuat isi resep. |
 
 ### Operasional dan audit
@@ -92,6 +96,8 @@ Kolom `id` adalah primary key kecuali tabel yang disebut memiliki kunci gabungan
 | `idempotency_keys` | `id`, `actor_id` FK, `key`, `operation`, `request_hash`, `response_reference?`, `created_at` | `(actor_id, operation, key)` unik; request berbeda dengan key sama ditolak. |
 
 ## 4. Akses, indeks, dan siklus hidup
+
+Data rekening dan video disimpan privat, tidak dimasukkan ke metadata audit, dan hanya disajikan setelah pemeriksaan kepemilikan pelanggan atau penugasan apotek. Indeks unik parsial mencegah pengajuan kedua selama status `requested`, `approved`, atau `refunded`; pengajuan yang ditolak dapat dikirim ulang selama jendela 72 jam.
 
 - Indeks: `orders(customer_id, created_at)`, `orders(pharmacy_id, status, created_at)`, `prescriptions(status, created_at)`, `stock_reservations(status, expires_at)`, `payments(provider, provider_reference)` dan indeks pencarian produk sesuai hasil pengukuran.
 - Jangan membuat cascade delete yang menghapus transaksi atau audit tanpa aturan retensi. Gunakan penonaktifan untuk master data yang sudah direferensikan.
