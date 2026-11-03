@@ -1,4 +1,4 @@
-export type KomerceShipmentLifecycle = 'in_delivery' | 'delivered' | 'exception' | 'cancelled' | null
+export type KomerceShipmentLifecycle = 'in_delivery' | 'delivered' | 'exception' | null
 
 export function mapKomerceShipmentStatus(value: unknown): KomerceShipmentLifecycle {
   const status = String(value ?? '')
@@ -14,6 +14,6 @@ export function mapKomerceShipmentStatus(value: unknown): KomerceShipmentLifecyc
   if (['retur', 'returned', 'return', 'return to sender', 'failed', 'delivery failed', 'exception', 'gagal antar', 'gagal diantar'].includes(status))
     return 'exception'
   if (['batal', 'cancel', 'cancelled', 'canceled'].includes(status))
-    return 'cancelled'
+    return 'exception'
   return null
 }

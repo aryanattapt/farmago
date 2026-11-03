@@ -880,8 +880,8 @@ async function persistKomerceTrackingUpdate(
       if (orderStatus === 'ready') inferredHandover = await transitionOrder('in_delivery', reason)
       if (orderStatus === 'in_delivery') await transitionOrder('completed', reason)
       if (orderStatus === 'completed') shipmentStatus = 'delivered'
-    } else if (lifecycle === 'exception' || lifecycle === 'cancelled') {
-      if (lifecycle === 'exception' && orderStatus === 'ready')
+    } else if (lifecycle === 'exception') {
+      if (orderStatus === 'ready')
         inferredHandover = await transitionOrder('in_delivery', reason)
       shipmentStatus = 'exception'
       if (statusChanged || order.shipment_status !== 'exception') {
