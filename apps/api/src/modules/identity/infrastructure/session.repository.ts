@@ -83,5 +83,7 @@ export async function issueToken(
   const parameter = type === 'password_reset' ? 'reset' : 'verify'
   const url = new URL('/', WEB_ORIGIN)
   url.searchParams.set(parameter, token)
-  return process.env.NODE_ENV === 'production' && !options?.returnUrlInProduction ? null : url.toString()
+  return process.env.NODE_ENV === 'production' && !options?.returnUrlInProduction
+    ? null
+    : url.toString()
 }
