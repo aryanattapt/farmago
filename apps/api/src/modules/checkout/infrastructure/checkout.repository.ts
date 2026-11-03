@@ -60,6 +60,9 @@ export class PostgresCheckoutRepository implements CheckoutRepository {
         available: sql<number>`${inventory.onHand} - ${inventory.reserved}`,
         sales_blocked: inventory.salesBlocked,
         shipping_weight_grams: products.shippingWeightGrams,
+        shipping_width_cm: products.shippingWidthCm,
+        shipping_height_cm: products.shippingHeightCm,
+        shipping_length_cm: products.shippingLengthCm,
       })
       .from(inventory)
       .innerJoin(products, eq(products.id, inventory.productId))

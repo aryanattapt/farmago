@@ -22,6 +22,9 @@ export type AdministrationProductRow = {
   available: number
   status: string
   shipping_weight_grams: number
+  shipping_width_cm: number | null
+  shipping_height_cm: number | null
+  shipping_length_cm: number | null
 }
 export type AdministrationPharmacyRow = {
   id: string
@@ -32,6 +35,9 @@ export type AdministrationPharmacyRow = {
   status: string
   license_reference: string | null
   rajaongkir_origin_id: number | null
+  delivery_contact_name: string | null
+  delivery_phone: string | null
+  delivery_email: string | null
   created_at: Date
 }
 export type AdministrationOrderRow = {
@@ -102,6 +108,7 @@ export interface AdministrationRepository {
     pharmacyId: string,
     status: string | null,
     originId?: number | null,
+    deliveryContact?: Partial<Pick<UpdatePharmacyRequestDto, 'deliveryContactName' | 'deliveryPhone' | 'deliveryEmail'>>,
   ): Promise<AdministrationResult<unknown>>
 }
 
@@ -111,6 +118,9 @@ export type ProductValues = {
   category: string
   sellUnit: string
   shippingWeightGrams: number
+  shippingWidthCm: number
+  shippingHeightCm: number
+  shippingLengthCm: number
 }
 export type InventoryValues = {
   pharmacyId: string
@@ -129,6 +139,9 @@ export type PharmacyValues = {
   city: string
   postalCodes: string[]
   rajaongkirOriginId: number | null
+  deliveryContactName: string
+  deliveryPhone: string
+  deliveryEmail: string
 }
 
 export async function listAdminProducts(repository: AdministrationRepository) {
@@ -136,6 +149,9 @@ export async function listAdminProducts(repository: AdministrationRepository) {
     ...publicProduct(row),
     status: row.status,
     shippingWeightGrams: row.shipping_weight_grams,
+    shippingWidthCm: row.shipping_width_cm,
+    shippingHeightCm: row.shipping_height_cm,
+    shippingLengthCm: row.shipping_length_cm,
   }))
 }
 
@@ -149,6 +165,9 @@ export async function listAdminPharmacies(repository: AdministrationRepository) 
     status: row.status,
     licenseReference: row.license_reference,
     rajaongkirOriginId: row.rajaongkir_origin_id,
+    deliveryContactName: row.delivery_contact_name,
+    deliveryPhone: row.delivery_phone,
+    deliveryEmail: row.delivery_email,
     createdAt: row.created_at,
   }))
 }
@@ -206,6 +225,9 @@ export function createAdminProduct(
   const category = String(input.category ?? '').trim()
   const sellUnit = String(input.sellUnit ?? '').trim()
   const shippingWeightGrams = Number(input.shippingWeightGrams)
+  const shippingWidthCm = Number(input.shippingWidthCm)
+  const shippingHeightCm = Number(input.shippingHeightCm)
+  const shippingLengthCm = Number(input.shippingLengthCm)
   if (
     !/^[A-Z0-9_-]{2,40}$/.test(sku) ||
     name.length < 2 ||
@@ -216,14 +238,15 @@ export function createAdminProduct(
     sellUnit.length > 100 ||
     !Number.isSafeInteger(shippingWeightGrams) ||
     shippingWeightGrams < 1 ||
-    shippingWeightGrams > 30000
+    shippingWeightGrams > 30000 ||
+    ![shippingWidthCm, shippingHeightCm, shippingLengthCm].every((value) => Number.isSafeInteger(value) && value >= 1 && value <= 200)
   )
     throw new ApplicationError(
       400,
       'INVALID_PRODUCT',
-      'SKU, nama, kategori, satuan jual, dan berat kemasan 1 sampai 30000 gram harus valid.',
+      'SKU, nama, kategori, satuan, berat, dan dimensi kemasan harus valid (dimensi 1–200 cm).',
     )
-  return repository.createProduct(actorId, input, { sku, name, category, sellUnit, shippingWeightGrams })
+  return repository.createProduct(actorId, input, { sku, name, category, sellUnit, shippingWeightGrams, shippingWidthCm, shippingHeightCm, shippingLengthCm })
 }
 
 export async function configureAdminInventory(
@@ -281,6 +304,9 @@ export async function updateAdminProduct(
     'batchTrackingRequired',
     'specialHandling',
     'shippingWeightGrams',
+    'shippingWidthCm',
+    'shippingHeightCm',
+    'shippingLengthCm',
     'status',
   ]
   if (Object.keys(input).some((key) => !allowed.includes(key)))
@@ -295,6 +321,14 @@ export async function updateAdminProduct(
       Number(input.shippingWeightGrams) < 0 || Number(input.shippingWeightGrams) > 30000)
   )
     throw new ApplicationError(400, 'INVALID_PRODUCT', 'Berat kemasan harus berupa bilangan bulat 0 sampai 30000 gram.')
+  for (const [field, value] of [
+    ['shippingWidthCm', input.shippingWidthCm],
+    ['shippingHeightCm', input.shippingHeightCm],
+    ['shippingLengthCm', input.shippingLengthCm],
+  ] as const) {
+    if (value != null && (!Number.isSafeInteger(Number(value)) || Number(value) < 1 || Number(value) > 200))
+      throw new ApplicationError(400, 'INVALID_PRODUCT', 'Dimensi kemasan harus berupa bilangan bulat 1 sampai 200 cm.')
+  }
   if (input.status !== undefined && !['active', 'inactive'].includes(input.status))
     throw new ApplicationError(400, 'INVALID_STATUS', 'Status produk tidak valid.')
   const result = await repository.updateProduct(actorId, productId, input)
@@ -313,6 +347,9 @@ export function createAdminPharmacy(
   const postalCodes = Array.isArray(input.postalCodes)
     ? [...new Set(input.postalCodes.map((value) => String(value).trim()))]
     : []
+  const deliveryContactName = String(input.deliveryContactName ?? '').trim()
+  const deliveryPhone = String(input.deliveryPhone ?? '').trim()
+  const deliveryEmail = String(input.deliveryEmail ?? '').trim()
   const rajaongkirOriginId =
     input.rajaongkirOriginId == null || input.rajaongkirOriginId === ''
       ? null
@@ -326,15 +363,18 @@ export function createAdminPharmacy(
     city.length > 100 ||
     !postalCodes.length ||
     postalCodes.some((code) => !/^\d{4,10}$/.test(code)) ||
+    deliveryContactName.length < 2 || deliveryContactName.length > 100 ||
+    !/^(?:\+?62|0|8)[\d\s()-]{8,18}$/.test(deliveryPhone) ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(deliveryEmail) || deliveryEmail.length > 200 ||
     (rajaongkirOriginId != null &&
       (!Number.isSafeInteger(rajaongkirOriginId) || rajaongkirOriginId <= 0))
   )
     throw new ApplicationError(
       400,
       'INVALID_PHARMACY',
-      'Nama, alamat, kota, dan kode pos layanan harus valid.',
+      'Nama, alamat, kota, kode pos, dan kontak pengirim apotek harus valid.',
     )
-  return repository.createPharmacy(actorId, input, { name, address, city, postalCodes, rajaongkirOriginId })
+  return repository.createPharmacy(actorId, input, { name, address, city, postalCodes, rajaongkirOriginId, deliveryContactName, deliveryPhone, deliveryEmail })
 }
 
 export async function updateAdminPharmacy(
@@ -345,6 +385,32 @@ export async function updateAdminPharmacy(
 ) {
   const status = input.status == null ? null : String(input.status)
   const hasOrigin = input.rajaongkirOriginId !== undefined
+  const hasDeliveryContact =
+    input.deliveryContactName !== undefined ||
+    input.deliveryPhone !== undefined ||
+    input.deliveryEmail !== undefined
+  const deliveryContact = hasDeliveryContact
+    ? {
+        ...(input.deliveryContactName !== undefined
+          ? { deliveryContactName: input.deliveryContactName == null ? null : String(input.deliveryContactName).trim() }
+          : {}),
+        ...(input.deliveryPhone !== undefined
+          ? { deliveryPhone: input.deliveryPhone == null ? null : String(input.deliveryPhone).trim() }
+          : {}),
+        ...(input.deliveryEmail !== undefined
+          ? { deliveryEmail: input.deliveryEmail == null ? null : String(input.deliveryEmail).trim().toLowerCase() }
+          : {}),
+      }
+    : undefined
+  if (deliveryContact) {
+    const { deliveryContactName, deliveryPhone, deliveryEmail } = deliveryContact
+    if (
+      (deliveryContactName != null && (deliveryContactName.length < 2 || deliveryContactName.length > 100)) ||
+      (deliveryPhone != null && !/^(?:\\+?62|0|8)[\\d\\s()-]{8,18}$/.test(deliveryPhone)) ||
+      (deliveryEmail != null && (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(deliveryEmail) || deliveryEmail.length > 200))
+    )
+      throw new ApplicationError(400, 'INVALID_DELIVERY_CONTACT', 'Nama, telepon, dan email kontak pengirim apotek harus valid.')
+  }
   let originId: number | null | undefined
   if (status !== null && !['pending', 'active', 'suspended'].includes(status))
     throw new ApplicationError(400, 'INVALID_STATUS', 'Status apotek tidak valid.')
@@ -356,15 +422,17 @@ export async function updateAdminPharmacy(
     if (originId != null && (!Number.isSafeInteger(originId) || originId <= 0))
       throw new ApplicationError(400, 'INVALID_SHIPPING_ORIGIN', 'ID lokasi asal RajaOngkir tidak valid.')
   }
-  if (status === null && !hasOrigin)
+  if (status === null && !hasOrigin && !hasDeliveryContact)
     throw new ApplicationError(400, 'INVALID_PHARMACY_UPDATE', 'Perubahan apotek kosong.')
-  const result = await repository.updatePharmacy(actorId, pharmacyId, status, originId)
+  const result = hasDeliveryContact
+    ? await repository.updatePharmacy(actorId, pharmacyId, status, originId, deliveryContact)
+    : await repository.updatePharmacy(actorId, pharmacyId, status, originId)
   if (result.ok) return result.value
   if (result.reason === 'not-found')
     throw new ApplicationError(404, 'NOT_FOUND', 'Apotek tidak ditemukan.')
   throw new ApplicationError(
     422,
     'PHARMACY_ONBOARDING_INCOMPLETE',
-    'Lengkapi referensi izin, wilayah layanan, alokasi stok daring, dan jam pemeriksaan resep sebelum aktivasi.',
+    'Lengkapi izin, wilayah layanan, asal ongkir, kontak pengirim, stok daring, dan jam pemeriksaan resep sebelum aktivasi.',
   )
 }

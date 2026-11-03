@@ -10,6 +10,7 @@ import {
   payments,
   pharmacies,
   prescriptions,
+  shipments,
   users,
 } from '../../../infrastructure/database/schema'
 
@@ -78,7 +79,7 @@ export class PostgresOrderReadRepository implements OrderListRepository {
       .where(eq(orders.id, orderId))
       .limit(1)
     if (!order) return null
-    const [items, prescriptionRows, history, payment, fulfillmentCheck] = await Promise.all([
+    const [items, prescriptionRows, history, payment, fulfillmentCheck, shipmentRows] = await Promise.all([
       db
         .select({
           id: orderItems.id,
@@ -138,6 +139,19 @@ export class PostgresOrderReadRepository implements OrderListRepository {
         .where(eq(fulfillmentChecks.orderId, orderId))
         .orderBy(desc(fulfillmentChecks.checkedAt))
         .limit(1),
+      db
+        .select({
+          provider: shipments.provider,
+          provider_order_no: shipments.providerOrderNo,
+          tracking_number: shipments.trackingNumber,
+          status: shipments.status,
+          pickup_date: shipments.pickupDate,
+          pickup_time: shipments.pickupTime,
+          pickup_vehicle: shipments.pickupVehicle,
+        })
+        .from(shipments)
+        .where(eq(shipments.orderId, orderId))
+        .limit(1),
     ])
     return {
       order,
@@ -146,6 +160,7 @@ export class PostgresOrderReadRepository implements OrderListRepository {
       history,
       payment: payment[0] ?? null,
       fulfillmentCheck: fulfillmentCheck[0] ?? null,
+      shipment: shipmentRows[0] ?? null,
     }
   }
 }

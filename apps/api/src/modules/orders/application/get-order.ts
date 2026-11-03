@@ -9,6 +9,7 @@ export type OrderReadModel = {
   history: any[]
   payment: any | null
   fulfillmentCheck: any | null
+  shipment?: any | null
 }
 
 export interface OrderReadRepository {
@@ -21,7 +22,7 @@ export async function getOrderView(
 ): Promise<Record<string, unknown>> {
   const model = await repository.findById(orderId)
   if (!model) throw new ApplicationError(404, 'NOT_FOUND', 'Pesanan tidak ditemukan.')
-  const { order, items, prescriptions, history, payment, fulfillmentCheck } = model
+  const { order, items, prescriptions, history, payment, fulfillmentCheck, shipment } = model
   if (order.customer_id !== user.id && !canAccessPharmacy(user, order.pharmacy_id))
     throw new ApplicationError(403, 'PHARMACY_SCOPE_REQUIRED', 'Akses apotek ini tidak diizinkan.')
   return {
@@ -52,6 +53,17 @@ export async function getOrderView(
       total: amount(order.total),
     },
     shipping: order.shipping_snapshot ?? null,
+    shipment: shipment
+      ? {
+          provider: shipment.provider,
+          ...(order.customer_id !== user.id ? { providerOrderNo: shipment.provider_order_no } : {}),
+          trackingNumber: shipment.tracking_number,
+          status: shipment.status,
+          pickupDate: shipment.pickup_date,
+          pickupTime: shipment.pickup_time,
+          pickupVehicle: shipment.pickup_vehicle,
+        }
+      : null,
     expiresAt: order.expires_at,
     createdAt: order.created_at,
     prescriptions: prescriptions.map((prescription) => ({

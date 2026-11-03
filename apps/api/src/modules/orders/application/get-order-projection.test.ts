@@ -24,6 +24,7 @@ const orderModel: OrderReadModel = {
   history: [{ from_status: 'paid', to_status: 'processing', reason: 'accepted', created_at: createdAt }],
   payment: { id: 'payment-1', status: 'settled', amount: '6.25', received_amount: null, currency: 'IDR', expires_at: null },
   fulfillmentCheck: { passed: true, pharmacist_check: true, note: 'checked', checked_at: createdAt },
+  shipment: { provider: 'Komerce', tracking_number: 'AWB-7', status: 'pickup_requested', pickup_date: '2026-11-04', pickup_time: '10:00', pickup_vehicle: 'Motor' },
 }
 function repository(model: OrderReadModel): OrderReadRepository {
   return { findById: async () => model }
@@ -45,6 +46,7 @@ describe('order read projection', () => {
       fulfillmentCheck: { passed: true, pharmacistCheck: true, note: 'checked' },
       prescriptions: [{ id: 'rx-1', status: 'approved', revision: 3, uploadedAt: createdAt }],
       history: [{ from: 'paid', to: 'processing', reason: 'accepted', at: createdAt }],
+      shipment: { provider: 'Komerce', trackingNumber: 'AWB-7', status: 'pickup_requested', pickupDate: '2026-11-04', pickupTime: '10:00', pickupVehicle: 'Motor' },
       pickupCode: 'PICKUP123',
     })
   })

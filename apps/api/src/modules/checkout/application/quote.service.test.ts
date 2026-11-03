@@ -26,7 +26,8 @@ const makeStock = (overrides: Partial<StockRow> = {}): StockRow => ({
   id: PRODUCT_ID, sku: 'SKU-1', name: 'Vitamin C', sell_unit: 'botol',
   category: 'Vitamin', requires_prescription: false, batch_tracking_required: false,
   status: 'active', special_handling: false, unit_price: '10.25',
-  available: 10, sales_blocked: false, shipping_weight_grams: 100, ...overrides,
+  available: 10, sales_blocked: false, shipping_weight_grams: 100,
+  shipping_width_cm: 5, shipping_height_cm: 8, shipping_length_cm: 5, ...overrides,
 })
 function makeRepository(options: {
   address?: AddressRow | null
@@ -184,6 +185,23 @@ describe('checkout quote use case', () => {
     expect(result.quote.pharmacy.id).toBe('route')
     expect(result.quote.totals.shippingFee).toBe('9000.00')
     expect(originCalls).toEqual([111, 222])
+  })
+
+  test('requires all product package dimensions before offering delivery', async () => {
+    const noDimensions = makeRepository({
+      stocks: { 'pharmacy-1': [makeStock({ shipping_height_cm: null })] },
+    })
+    expect(await buildCheckoutQuote(noDimensions.repository, {
+      ...pickup, addressId: ADDRESS_ID, fulfillmentMethod: 'delivery',
+    }, shipping)).toEqual({ ok: false, reason: 'shipping-dimensions-missing' })
+    await expect(requestCheckoutQuote(noDimensions.repository, 'customer-1', {
+      items: [{ productId: PRODUCT_ID, quantity: 1 }],
+      fulfillmentMethod: 'delivery',
+      addressId: ADDRESS_ID,
+    }, shipping)).rejects.toMatchObject({
+      status: 422,
+      code: 'PRODUCT_DIMENSIONS_NOT_CONFIGURED',
+    })
   })
 
   test('returns address-not-found and pharmacy-unavailable reasons', async () => {

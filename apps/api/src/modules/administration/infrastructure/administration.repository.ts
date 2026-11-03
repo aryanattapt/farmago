@@ -53,6 +53,9 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
         sell_unit: products.sellUnit,
         requires_prescription: products.requiresPrescription,
         shipping_weight_grams: products.shippingWeightGrams,
+        shipping_width_cm: products.shippingWidthCm,
+        shipping_height_cm: products.shippingHeightCm,
+        shipping_length_cm: products.shippingLengthCm,
         batch_tracking_required: products.batchTrackingRequired,
         status: products.status,
         indicative_price: sql<string>`COALESCE(MIN(${activeInventory.unitPrice}),0)`,
@@ -75,6 +78,9 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
         status: pharmacies.status,
         license_reference: pharmacies.licenseReference,
         rajaongkir_origin_id: pharmacies.rajaongkirOriginId,
+        delivery_contact_name: pharmacies.deliveryContactName,
+        delivery_phone: pharmacies.deliveryPhone,
+        delivery_email: pharmacies.deliveryEmail,
         created_at: pharmacies.createdAt,
       })
       .from(pharmacies)
@@ -145,12 +151,12 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
   async createProduct(
     actorId: string,
     input: CreateProductRequestDto,
-    values: { sku: string; name: string; category: string; sellUnit: string; shippingWeightGrams: number },
+    values: { sku: string; name: string; category: string; sellUnit: string; shippingWeightGrams: number; shippingWidthCm: number; shippingHeightCm: number; shippingLengthCm: number },
   ) {
     return transaction(async (client) => {
       const result = await client.query(
-        `INSERT INTO products(sku,name,description,category,sell_unit,shipping_weight_grams,requires_prescription,batch_tracking_required,special_handling,status)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'inactive') RETURNING id,sku,name,status`,
+        `INSERT INTO products(sku,name,description,category,sell_unit,shipping_weight_grams,shipping_width_cm,shipping_height_cm,shipping_length_cm,requires_prescription,batch_tracking_required,special_handling,status)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'inactive') RETURNING id,sku,name,status`,
         [
           values.sku,
           values.name,
@@ -158,6 +164,9 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
           values.category,
           values.sellUnit,
           values.shippingWeightGrams,
+          values.shippingWidthCm,
+          values.shippingHeightCm,
+          values.shippingLengthCm,
           input.requiresPrescription === true,
           input.batchTrackingRequired === true,
           input.specialHandling === true,
@@ -232,7 +241,7 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
       const result = await client.query(
         `UPDATE products SET name=COALESCE($2,name),description=COALESCE($3,description),category=COALESCE($4,category),
         sell_unit=COALESCE($5,sell_unit),requires_prescription=COALESCE($6,requires_prescription),batch_tracking_required=COALESCE($7,batch_tracking_required),special_handling=COALESCE($8,special_handling),
-        shipping_weight_grams=COALESCE($9,shipping_weight_grams),status=COALESCE($10,status),updated_at=now() WHERE id=$1 RETURNING id,sku,name,status,shipping_weight_grams`,
+        shipping_weight_grams=COALESCE($9,shipping_weight_grams),shipping_width_cm=COALESCE($10,shipping_width_cm),shipping_height_cm=COALESCE($11,shipping_height_cm),shipping_length_cm=COALESCE($12,shipping_length_cm),status=COALESCE($13,status),updated_at=now() WHERE id=$1 RETURNING id,sku,name,status,shipping_weight_grams,shipping_width_cm,shipping_height_cm,shipping_length_cm`,
         [
           productId,
           input.name ?? null,
@@ -243,6 +252,9 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
           input.batchTrackingRequired ?? null,
           input.specialHandling ?? null,
           input.shippingWeightGrams == null ? null : Number(input.shippingWeightGrams),
+          input.shippingWidthCm == null ? null : Number(input.shippingWidthCm),
+          input.shippingHeightCm == null ? null : Number(input.shippingHeightCm),
+          input.shippingLengthCm == null ? null : Number(input.shippingLengthCm),
           input.status ?? null,
         ],
       )
@@ -255,8 +267,8 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
   async createPharmacy(actorId: string, input: CreatePharmacyRequestDto, values: PharmacyValues) {
     return transaction(async (client) => {
       const result = await client.query(
-        `INSERT INTO pharmacies(name,address_text,city,postal_codes,license_reference,rajaongkir_origin_id,status)
-        VALUES($1,$2,$3,$4,$5,$6,'pending') RETURNING id,name,status,rajaongkir_origin_id`,
+        `INSERT INTO pharmacies(name,address_text,city,postal_codes,license_reference,rajaongkir_origin_id,delivery_contact_name,delivery_phone,delivery_email,status)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending') RETURNING id,name,status,rajaongkir_origin_id`,
         [
           values.name,
           values.address,
@@ -266,6 +278,9 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
             .trim()
             .slice(0, 160) || null,
           values.rajaongkirOriginId,
+          values.deliveryContactName,
+          values.deliveryPhone,
+          values.deliveryEmail,
         ],
       )
       await recordAudit(client, actorId, 'pharmacy.created', 'pharmacy', result.rows[0].id, {})
@@ -278,11 +293,12 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
     pharmacyId: string,
     status: string | null,
     originId?: number | null,
+    deliveryContact?: Partial<{ deliveryContactName: string | null; deliveryPhone: string | null; deliveryEmail: string | null }>,
   ): Promise<AdministrationResult<unknown>> {
     return transaction(async (client) => {
       if (status === 'active') {
         const readiness = await client.query(
-          `SELECT p.license_reference,cardinality(p.postal_codes) AS postal_count,
+          `SELECT p.license_reference,p.rajaongkir_origin_id,p.delivery_contact_name,p.delivery_phone,p.delivery_email,cardinality(p.postal_codes) AS postal_count,
           COUNT(DISTINCT i.product_id) AS inventory_count,COUNT(DISTINCT h.weekday) AS service_days
           FROM pharmacies p LEFT JOIN inventory i ON i.pharmacy_id=p.id LEFT JOIN pharmacy_service_hours h ON h.pharmacy_id=p.id AND h.service_type='prescription' AND h.active=true
           WHERE p.id=$1 GROUP BY p.id`,
@@ -293,30 +309,32 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
         if (
           !String(gate.license_reference ?? '').trim() ||
           Number(gate.postal_count) < 1 ||
+          !gate.rajaongkir_origin_id ||
+          !String(gate.delivery_contact_name ?? '').trim() ||
+          !String(gate.delivery_phone ?? '').trim() ||
+          !String(gate.delivery_email ?? '').trim() ||
           Number(gate.inventory_count) < 1 ||
           Number(gate.service_days) < 1
         )
           return { ok: false, reason: 'onboarding-incomplete' }
       }
-      let result
-      if (status !== null && originId !== undefined) {
-        result = await client.query(
-          'UPDATE pharmacies SET status=$2,rajaongkir_origin_id=$3 WHERE id=$1 RETURNING id,name,status,rajaongkir_origin_id',
-          [pharmacyId, status, originId],
-        )
-      } else if (status !== null) {
-        result = await client.query(
-          'UPDATE pharmacies SET status=$2 WHERE id=$1 RETURNING id,name,status,rajaongkir_origin_id',
-          [pharmacyId, status],
-        )
-      } else if (originId !== undefined) {
-        result = await client.query(
-          'UPDATE pharmacies SET rajaongkir_origin_id=$2 WHERE id=$1 RETURNING id,name,status,rajaongkir_origin_id',
-          [pharmacyId, originId],
-        )
-      } else {
-        return { ok: false, reason: 'not-found' }
+      const values: unknown[] = [pharmacyId]
+      const assignments: string[] = []
+      const add = (column: string, value: unknown) => {
+        values.push(value)
+        assignments.push(`${column}=$${values.length}`)
       }
+      if (status !== null) add('status', status)
+      if (originId !== undefined) add('rajaongkir_origin_id', originId)
+      if (deliveryContact) {
+        if (deliveryContact.deliveryContactName !== undefined) add('delivery_contact_name', deliveryContact.deliveryContactName)
+        if (deliveryContact.deliveryPhone !== undefined) add('delivery_phone', deliveryContact.deliveryPhone)
+        if (deliveryContact.deliveryEmail !== undefined) add('delivery_email', deliveryContact.deliveryEmail)
+      }
+      const result = await client.query(
+        `UPDATE pharmacies SET ${assignments.join(',')} WHERE id=$1 RETURNING id,name,status,rajaongkir_origin_id,delivery_contact_name,delivery_phone,delivery_email`,
+        values,
+      )
       if (!result.rowCount) return { ok: false, reason: 'not-found' }
       if (status !== null)
         await recordAudit(client, actorId, 'pharmacy.status_changed', 'pharmacy', pharmacyId, { status })
@@ -324,6 +342,8 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
         await recordAudit(client, actorId, 'pharmacy.shipping_origin_changed', 'pharmacy', pharmacyId, {
           originId,
         })
+      if (deliveryContact)
+        await recordAudit(client, actorId, 'pharmacy.delivery_contact_changed', 'pharmacy', pharmacyId, {})
       return { ok: true, value: result.rows[0] }
     })
   }

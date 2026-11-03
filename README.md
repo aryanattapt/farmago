@@ -15,6 +15,14 @@ Prasyarat: Bun dan Docker Compose.
 7. Jalankan web di terminal kedua: `bun run dev:web`.
 8. Buka `http://localhost:5173`.
 
+## Shipping Delivery Komerce
+
+Shipping Cost v2 and Shipping Delivery use separate API products and credentials. Delivery booking requires a Komerce Shipping Delivery account/key (Enterprise plan) in `KOMERCE_DELIVERY_API_KEY`; keep it server-side and do not reuse the `RAJAONGKIR_API_KEY`. Use `https://api-sandbox.collaborator.komerce.id` as `KOMERCE_DELIVERY_BASE_URL` for UAT, then the production host after the Komerce account is ready.
+
+Before enabling a pharmacy for delivery, configure its RajaOngkir origin ID and sender contact name, phone, and email. Each catalog item needs its packed weight and dimensions in cm. At order-ready, pharmacy staff can create the Komerce order, schedule one pickup (at least 90 minutes ahead, WIB), and download the label after pickup confirmation. Creating the Komerce order deducts the shipping charge from the Komerce dashboard balance. Check that balance before booking.
+
+The checkout amount and selected service currently come from Shipping Cost v2. Confirm that the same courier/service is enabled and accepted by Shipping Delivery in sandbox before pilot; provider rejections are shown to staff. Timeouts and server errors are stored as an unknown outcome and block retries until staff checks the Komerce dashboard, preventing duplicate courier orders or pickups.
+
 ## Menjalankan seluruh stack dengan Docker
 
 Jalankan `docker compose up --build -d`, lalu buka `http://localhost:8080`. Compose menjalankan PostgreSQL, migrasi, API, dan web. Untuk memuat data contoh, jalankan `docker compose exec api bun apps/api/src/interfaces/cli/seed.ts`.

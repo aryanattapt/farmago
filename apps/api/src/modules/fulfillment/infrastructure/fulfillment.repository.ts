@@ -1,7 +1,10 @@
+import { randomUUID } from 'node:crypto'
 import { canAccessPharmacy, hasRole, type User } from '../../../shared/domain/access'
 import { eq } from 'drizzle-orm'
 import { db, transaction } from '../../../infrastructure/database/client'
-import { orders } from '../../../infrastructure/database/schema'
+import { orders, shipments } from '../../../infrastructure/database/schema'
+import { KomerceDeliveryClient, KomerceDeliveryError } from '../../shipping'
+import { buildKomerceStoreOrderPayload, validateKomercePickupInput } from '../domain/komerce-order'
 import { recordAudit } from '../../platform'
 import { canTransitionOrder, insertOrderStatusHistory, normalizePickupCode } from '../../orders'
 import { parseDispensedLots } from '../domain/dispensed-lots'
@@ -25,6 +28,7 @@ function checkPharmacyScope(actor: User, pharmacyId: string) {
 }
 
 export class PostgresFulfillmentRepository implements FulfillmentRepository {
+  constructor(private readonly deliveryClient = new KomerceDeliveryClient()) {}
   async executeCommand(orderId: string, actor: User, input: FulfillmentCommandRequestDto) {
     return transaction(async (client) => {
       const selected = await client.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [orderId])
@@ -126,7 +130,7 @@ export class PostgresFulfillmentRepository implements FulfillmentRepository {
         await insertOrderStatusHistory(client, order.id, 'ready', 'completed', actor.id, 'pickup')
         input.proofReference = proofReference
       } else if (input.command === 'handover_to_courier') {
-        fail(503, 'SHIPPING_PROVIDER_NOT_CONFIGURED', 'Penyedia pengiriman belum dikonfigurasi.')
+        fail(422, 'PICKUP_SCHEDULE_REQUIRED', 'Jadwalkan pickup kurir melalui formulir pengiriman.')
       } else fail(400, 'INVALID_COMMAND', 'Perintah pemenuhan tidak dikenal.')
       await recordAudit(
         client,
@@ -270,24 +274,323 @@ export class PostgresFulfillmentRepository implements FulfillmentRepository {
     })
   }
 
-  async createShipmentBooking(orderId: string, actor: User): Promise<never> {
-    const [order] = await db
+  async createShipmentBooking(orderId: string, actor: User) {
+    if (!this.deliveryClient.isConfigured())
+      fail(503, 'DELIVERY_PROVIDER_NOT_CONFIGURED', 'Shipping Delivery Komerce belum dikonfigurasi.')
+    const claim = await transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT o.*,p.name AS pharmacy_name,p.address_text AS shipper_address,
+          p.rajaongkir_origin_id,p.delivery_contact_name,p.delivery_phone,p.delivery_email,
+          p.latitude AS shipper_latitude,p.longitude AS shipper_longitude,
+          u.name AS receiver_name,u.email AS receiver_email,
+          o.address_snapshot->>'phone' AS receiver_phone,
+          o.address_snapshot->>'recipientName' AS receiver_snapshot_name,
+          o.address_snapshot->>'addressText' AS receiver_address,
+          NULLIF(o.address_snapshot->>'rajaongkirDestinationId','')::integer AS receiver_destination_id,
+          NULLIF(o.address_snapshot->>'latitude','') AS receiver_latitude,
+          NULLIF(o.address_snapshot->>'longitude','') AS receiver_longitude
+        FROM orders o
+        JOIN pharmacies p ON p.id=o.pharmacy_id
+        JOIN users u ON u.id=o.customer_id
+        WHERE o.id=$1 FOR UPDATE OF o`,
+        [orderId],
+      )
+      if (!selected.rowCount) fail(404, 'NOT_FOUND', 'Pesanan tidak ditemukan.')
+      const order = selected.rows[0]
+      checkPharmacyScope(actor, order.pharmacy_id)
+      if (order.fulfillment_method !== 'delivery' || order.status !== 'ready')
+        fail(409, 'INVALID_ORDER_STATE', 'Hanya pesanan pengiriman yang siap dapat dibuatkan booking.')
+      const prior = await client.query('SELECT * FROM shipments WHERE order_id=$1 FOR UPDATE', [orderId])
+      const shipment = prior.rows[0]
+      if (shipment && shipment.method !== 'delivery')
+        fail(409, 'SHIPMENT_METHOD_MISMATCH', 'Pesanan ini sudah tercatat sebagai ambil di apotek.')
+      if (shipment && ['booking_pending','booking_unknown'].includes(shipment.status))
+        fail(409, 'DELIVERY_BOOKING_REVIEW_REQUIRED', 'Hasil booking sebelumnya belum pasti. Periksa dashboard Komerce sebelum mencoba lagi.')
+      if (shipment && ['booked','pickup_pending','pickup_unknown','pickup_requested','pickup_failed'].includes(shipment.status))
+        return { alreadyBooked: true as const, shipmentId: shipment.id, providerOrderNo: shipment.provider_order_no, status: shipment.status, trackingNumber: shipment.tracking_number }
+      if (shipment && !['pending','booking_failed'].includes(shipment.status))
+        fail(409, 'DELIVERY_BOOKING_STATE_INVALID', 'Status pengiriman tidak mengizinkan pembuatan order kurir baru.')
+      const snapshot = typeof order.shipping_snapshot === 'string'
+        ? JSON.parse(order.shipping_snapshot)
+        : order.shipping_snapshot
+      if (!snapshot)
+        fail(422, 'DELIVERY_DATA_INCOMPLETE', 'Snapshot ongkir pesanan tidak tersedia.')
+      const itemRows = await client.query(
+        `SELECT product_name_snapshot,sell_unit_snapshot,quantity,unit_price,line_total,
+          shipping_weight_grams_snapshot,shipping_width_cm_snapshot,shipping_height_cm_snapshot,shipping_length_cm_snapshot
+        FROM order_items WHERE order_id=$1 ORDER BY id`,
+        [orderId],
+      )
+      const orderItems = itemRows.rows.map((item: any) => ({
+        name: String(item.product_name_snapshot),
+        variant: String(item.sell_unit_snapshot),
+        quantity: Number(item.quantity),
+        price: Math.round(Number(item.unit_price)),
+        weightGrams: Number(item.shipping_weight_grams_snapshot),
+        widthCm: item.shipping_width_cm_snapshot == null ? null : Number(item.shipping_width_cm_snapshot),
+        heightCm: item.shipping_height_cm_snapshot == null ? null : Number(item.shipping_height_cm_snapshot),
+        lengthCm: item.shipping_length_cm_snapshot == null ? null : Number(item.shipping_length_cm_snapshot),
+      }))
+      const itemValue = orderItems.reduce((sum: number, item: any) => sum + item.price * item.quantity, 0)
+      const shippingCost = Math.round(Number(snapshot.cost))
+      if (
+        itemValue !== Math.round(Number(order.subtotal)) ||
+        !Number.isSafeInteger(shippingCost) ||
+        shippingCost !== Math.round(Number(order.shipping_fee))
+      )
+        fail(409, 'DELIVERY_SNAPSHOT_MISMATCH', 'Nilai ongkir atau produk pada pesanan tidak cocok dengan snapshot checkout.')
+      const originPinPoint = pinPoint(order.shipper_latitude, order.shipper_longitude)
+      const destinationPinPoint = pinPoint(order.receiver_latitude, order.receiver_longitude)
+      const payload = buildKomerceStoreOrderPayload({
+        brandName: process.env.KOMERCE_DELIVERY_BRAND_NAME ?? 'FarmaGO',
+        orderDate: order.created_at,
+        shipperName: order.delivery_contact_name ?? '',
+        shipperPhone: order.delivery_phone ?? '',
+        shipperEmail: order.delivery_email ?? '',
+        shipperDestinationId: Number(order.rajaongkir_origin_id),
+        shipperAddress: order.shipper_address,
+        originPinPoint,
+        receiverName: order.receiver_snapshot_name || order.receiver_name,
+        receiverPhone: order.receiver_phone,
+        receiverEmail: order.receiver_email,
+        receiverDestinationId: Number(order.receiver_destination_id),
+        receiverAddress: order.receiver_address,
+        destinationPinPoint,
+        shipping: snapshot.courierName || snapshot.courierCode,
+        shippingType: snapshot.service,
+        shippingCost,
+        itemValue,
+        orderItems,
+        notes: `FarmaGO #${orderId.slice(0,8)}`,
+      })
+      const requestSummary = {
+        orderId,
+        courier: payload.shipping,
+        service: payload.shipping_type,
+        shippingCost: payload.shipping_cost,
+        itemCount: orderItems.length,
+        weightGrams: orderItems.reduce((sum: number, item: any) => sum + item.weightGrams * item.quantity, 0),
+      }
+      const shipmentId = shipment?.id ?? randomUUID()
+      if (shipment) {
+        await client.query(
+          `UPDATE shipments SET status='booking_pending',provider='Komerce',provider_order_no=NULL,
+            tracking_number=NULL,pickup_date=NULL,pickup_time=NULL,pickup_vehicle=NULL WHERE id=$1`,
+          [shipmentId],
+        )
+      } else {
+        await client.query(
+          `INSERT INTO shipments(id,order_id,method,provider,status) VALUES($1,$2,'delivery','Komerce','booking_pending')`,
+          [shipmentId, orderId],
+        )
+      }
+      const merchantReference = `fg-store-${orderId}-${randomUUID()}`
+      const attempt = await client.query(
+        `INSERT INTO shipment_attempts(shipment_id,merchant_reference,operation,status,request_snapshot)
+        VALUES($1,$2,'store_order','creating',$3) RETURNING id`,
+        [shipmentId, merchantReference, requestSummary],
+      )
+      await recordAudit(client, actor.id, 'shipment.booking_started', 'order', orderId, {
+        provider: 'Komerce', shippingCost: requestSummary.shippingCost,
+      })
+      return {
+        alreadyBooked: false as const,
+        shipmentId,
+        attemptId: attempt.rows[0].id,
+        merchantReference,
+        payload,
+      }
+    })
+    if (claim.alreadyBooked) return {
+      shipmentId: claim.shipmentId,
+      providerOrderNo: claim.providerOrderNo,
+      status: claim.status,
+      trackingNumber: claim.trackingNumber,
+      replayed: true,
+    }
+    try {
+      const providerOrder = await this.deliveryClient.storeOrder(claim.payload)
+      await transaction(async (client) => {
+        await client.query(
+          `UPDATE shipments SET status='booked',provider_order_no=$2 WHERE id=$1 AND status='booking_pending'`,
+          [claim.shipmentId, providerOrder.orderNo],
+        )
+        await client.query(
+          `UPDATE shipment_attempts SET status='confirmed',provider_reference=$2,response_snapshot=$3 WHERE id=$1`,
+          [claim.attemptId, providerOrder.orderNo, { orderNo: providerOrder.orderNo, providerOrderId: providerOrder.providerOrderId }],
+        )
+        await recordAudit(client, actor.id, 'shipment.booking_confirmed', 'order', orderId, {
+          provider: 'Komerce', providerOrderNo: providerOrder.orderNo,
+        })
+      })
+      return { shipmentId: claim.shipmentId, providerOrderNo: providerOrder.orderNo, status: 'booked' }
+    } catch (error) {
+      const rejected = error instanceof KomerceDeliveryError && error.outcome === 'rejected'
+      const message = error instanceof KomerceDeliveryError ? error.providerMessage : 'Komerce belum mengonfirmasi hasil booking.'
+      const status = rejected ? 'booking_failed' : 'booking_unknown'
+      await transaction(async (client) => {
+        await client.query('UPDATE shipments SET status=$2 WHERE id=$1', [claim.shipmentId, status])
+        await client.query(
+          'UPDATE shipment_attempts SET status=$2,response_snapshot=$3 WHERE id=$1',
+          [claim.attemptId, rejected ? 'failed' : 'exception', { message }],
+        )
+        await recordAudit(client, actor.id, rejected ? 'shipment.booking_failed' : 'shipment.booking_unknown', 'order', orderId, { provider: 'Komerce' })
+      })
+      if (rejected)
+        fail(422, 'DELIVERY_BOOKING_REJECTED', `Komerce menolak booking: ${message}`)
+      fail(503, 'DELIVERY_BOOKING_OUTCOME_UNKNOWN', 'Hasil booking kurir belum pasti. Periksa dashboard Komerce dan jangan ulangi booking sebelum status dipastikan.')
+    }
+  }
+
+  async requestShipmentPickup(
+    orderId: string,
+    actor: User,
+    input: { pickupDate?: unknown; pickupTime?: unknown; pickupVehicle?: unknown },
+  ) {
+    const schedule = validateKomercePickupInput({
+      pickupDate: input.pickupDate,
+      pickupTime: input.pickupTime,
+      pickupVehicle: input.pickupVehicle,
+    })
+    if (!this.deliveryClient.isConfigured())
+      fail(503, 'DELIVERY_PROVIDER_NOT_CONFIGURED', 'Shipping Delivery Komerce belum dikonfigurasi.')
+    const claim = await transaction(async (client) => {
+      const selected = await client.query(
+        `SELECT o.id,o.pharmacy_id,o.fulfillment_method,o.status,s.id AS shipment_id,
+          s.method,s.status AS shipment_status,s.provider_order_no,s.tracking_number,
+          NULLIF(o.shipping_snapshot->>'weightGrams','')::integer AS weight_grams
+        FROM orders o LEFT JOIN shipments s ON s.order_id=o.id
+        WHERE o.id=$1 FOR UPDATE OF o`,
+        [orderId],
+      )
+      if (!selected.rowCount) fail(404, 'NOT_FOUND', 'Pesanan tidak ditemukan.')
+      const order = selected.rows[0]
+      checkPharmacyScope(actor, order.pharmacy_id)
+      if (order.fulfillment_method !== 'delivery' || order.status !== 'ready')
+        fail(409, 'INVALID_ORDER_STATE', 'Pickup kurir hanya dapat dijadwalkan untuk pesanan pengiriman yang siap.')
+      if (!order.shipment_id || order.method !== 'delivery' || !order.provider_order_no)
+        fail(409, 'SHIPMENT_NOT_BOOKED', 'Buat order kurir sebelum menjadwalkan pickup.')
+      if (['pickup_pending','pickup_unknown'].includes(order.shipment_status))
+        fail(409, 'DELIVERY_PICKUP_REVIEW_REQUIRED', 'Hasil request pickup sebelumnya belum pasti. Periksa dashboard Komerce sebelum mencoba lagi.')
+      if (order.shipment_status === 'pickup_requested')
+        return { alreadyRequested: true as const, shipmentId: order.shipment_id, orderNo: order.provider_order_no, status: order.shipment_status, trackingNumber: order.tracking_number }
+      if (!['booked','pickup_failed'].includes(order.shipment_status))
+        fail(409, 'SHIPMENT_NOT_BOOKED', 'Order kurir belum terkonfirmasi.')
+      const weightGrams = Number(order.weight_grams)
+      if (
+        (schedule.pickupVehicle === 'Motor' && weightGrams > 5000) ||
+        (weightGrams >= 10_000 && schedule.pickupVehicle !== 'Truk')
+      )
+        fail(422, 'PICKUP_VEHICLE_UNSUITABLE', 'Pilih Mobil untuk paket di atas 5 kg, dan Truk untuk paket 10 kg atau lebih.')
+      await client.query(
+        `UPDATE shipments SET status='pickup_pending',pickup_date=$2,pickup_time=$3,pickup_vehicle=$4 WHERE id=$1`,
+        [order.shipment_id, schedule.pickupDate, schedule.pickupTime, schedule.pickupVehicle],
+      )
+      const merchantReference = `fg-pickup-${orderId}-${randomUUID()}`
+      const attempt = await client.query(
+        `INSERT INTO shipment_attempts(shipment_id,merchant_reference,operation,status,request_snapshot)
+        VALUES($1,$2,'pickup','creating',$3) RETURNING id`,
+        [order.shipment_id, merchantReference, { pickupDate: schedule.pickupDate, pickupTime: schedule.pickupTime, pickupVehicle: schedule.pickupVehicle }],
+      )
+      await recordAudit(client, actor.id, 'shipment.pickup_started', 'order', orderId, {
+        provider: 'Komerce', pickupDate: schedule.pickupDate, pickupTime: schedule.pickupTime, pickupVehicle: schedule.pickupVehicle,
+      })
+      return {
+        alreadyRequested: false as const,
+        shipmentId: order.shipment_id,
+        attemptId: attempt.rows[0].id,
+        orderNo: order.provider_order_no,
+        schedule,
+      }
+    })
+    if (claim.alreadyRequested) return {
+      shipmentId: claim.shipmentId,
+      providerOrderNo: claim.orderNo,
+      status: claim.status,
+      trackingNumber: claim.trackingNumber,
+      replayed: true,
+    }
+    try {
+      const pickup = await this.deliveryClient.requestPickup({
+        pickup_date: claim.schedule.pickupDate,
+        pickup_time: claim.schedule.pickupTime,
+        pickup_vehicle: claim.schedule.pickupVehicle,
+        orders: [{ order_no: claim.orderNo }],
+      })
+      await transaction(async (client) => {
+        await client.query(
+          `UPDATE shipments SET status='pickup_requested',tracking_number=COALESCE($2,tracking_number) WHERE id=$1 AND status='pickup_pending'`,
+          [claim.shipmentId, pickup.awb],
+        )
+        await client.query(
+          `UPDATE shipment_attempts SET status='confirmed',provider_reference=$2,response_snapshot=$3 WHERE id=$1`,
+          [claim.attemptId, pickup.awb, { awb: pickup.awb }],
+        )
+        await recordAudit(client, actor.id, 'shipment.pickup_confirmed', 'order', orderId, {
+          provider: 'Komerce', awb: pickup.awb,
+        })
+      })
+      return {
+        shipmentId: claim.shipmentId,
+        providerOrderNo: claim.orderNo,
+        trackingNumber: pickup.awb,
+        status: 'pickup_requested',
+        pickupDate: claim.schedule.pickupDate,
+        pickupTime: claim.schedule.pickupTime,
+        pickupVehicle: claim.schedule.pickupVehicle,
+      }
+    } catch (error) {
+      const rejected = error instanceof KomerceDeliveryError && error.outcome === 'rejected'
+      const message = error instanceof KomerceDeliveryError ? error.providerMessage : 'Komerce belum mengonfirmasi hasil pickup.'
+      const status = rejected ? 'pickup_failed' : 'pickup_unknown'
+      await transaction(async (client) => {
+        await client.query('UPDATE shipments SET status=$2 WHERE id=$1', [claim.shipmentId, status])
+        await client.query(
+          'UPDATE shipment_attempts SET status=$2,response_snapshot=$3 WHERE id=$1',
+          [claim.attemptId, rejected ? 'failed' : 'exception', { message }],
+        )
+        await recordAudit(client, actor.id, rejected ? 'shipment.pickup_failed' : 'shipment.pickup_unknown', 'order', orderId, { provider: 'Komerce' })
+      })
+      if (rejected)
+        fail(422, 'DELIVERY_PICKUP_REJECTED', `Komerce menolak request pickup: ${message}`)
+      fail(503, 'DELIVERY_PICKUP_OUTCOME_UNKNOWN', 'Hasil request pickup belum pasti. Periksa dashboard Komerce dan jangan ulangi sebelum status dipastikan.')
+    }
+  }
+
+  async getShipmentLabel(orderId: string, actor: User) {
+    if (!this.deliveryClient.isConfigured())
+      fail(503, 'DELIVERY_PROVIDER_NOT_CONFIGURED', 'Shipping Delivery Komerce belum dikonfigurasi.')
+    const [shipment] = await db
       .select({
-        pharmacy_id: orders.pharmacyId,
-        fulfillment_method: orders.fulfillmentMethod,
-        status: orders.status,
+        id: orders.id,
+        pharmacyId: orders.pharmacyId,
+        method: orders.fulfillmentMethod,
+        providerOrderNo: shipments.providerOrderNo,
+        shipmentStatus: shipments.status,
       })
       .from(orders)
+      .leftJoin(shipments, eq(shipments.orderId, orders.id))
       .where(eq(orders.id, orderId))
       .limit(1)
-    if (!order) fail(404, 'NOT_FOUND', 'Pesanan tidak ditemukan.')
-    checkPharmacyScope(actor, order.pharmacy_id)
-    if (order.fulfillment_method !== 'delivery' || order.status !== 'ready')
-      fail(
-        409,
-        'INVALID_ORDER_STATE',
-        'Hanya pesanan pengiriman yang siap dapat dibuatkan booking.',
-      )
-    fail(503, 'SHIPPING_PROVIDER_NOT_CONFIGURED', 'Penyedia pengiriman belum dikonfigurasi.')
+    if (!shipment) fail(404, 'NOT_FOUND', 'Pesanan tidak ditemukan.')
+    checkPharmacyScope(actor, shipment.pharmacyId)
+    if (shipment.method !== 'delivery' || !shipment.providerOrderNo || shipment.shipmentStatus !== 'pickup_requested')
+      fail(409, 'DELIVERY_LABEL_NOT_READY', 'Label baru tersedia setelah pickup terkonfirmasi.')
+    try {
+      return await this.deliveryClient.printLabel(shipment.providerOrderNo)
+    } catch (error) {
+      if (error instanceof KomerceDeliveryError && error.outcome === 'rejected')
+        fail(422, 'DELIVERY_LABEL_REJECTED', `Komerce belum dapat membuat label: ${error.providerMessage}`)
+      fail(503, 'DELIVERY_LABEL_UNAVAILABLE', 'Label pengiriman belum dapat diambil. Coba lagi sebentar.')
+    }
   }
+}
+
+function pinPoint(latitude: unknown, longitude: unknown) {
+  if (latitude == null || longitude == null) return null
+  const lat = Number(latitude)
+  const lng = Number(longitude)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180)
+    return null
+  return `${lat}, ${lng}`
 }

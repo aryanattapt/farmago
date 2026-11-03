@@ -11,7 +11,9 @@ export interface FulfillmentRepository {
     input: FulfillmentCommandRequestDto,
   ): Promise<unknown>
   createCheck(orderId: string, actor: User, input: FulfillmentCheckRequestDto): Promise<unknown>
-  createShipmentBooking(orderId: string, actor: User): Promise<never>
+  createShipmentBooking(orderId: string, actor: User): Promise<unknown>
+  requestShipmentPickup(orderId: string, actor: User, input: { pickupDate?: unknown; pickupTime?: unknown; pickupVehicle?: unknown }): Promise<unknown>
+  getShipmentLabel(orderId: string, actor: User): Promise<{ base64: string }>
 }
 
 export function executeFulfillmentCommand(
@@ -38,4 +40,21 @@ export function createShipmentBooking(
   actor: User,
 ) {
   return repository.createShipmentBooking(orderId, actor)
+}
+
+export function requestShipmentPickup(
+  repository: FulfillmentRepository,
+  orderId: string,
+  actor: User,
+  input: { pickupDate?: unknown; pickupTime?: unknown; pickupVehicle?: unknown },
+) {
+  return repository.requestShipmentPickup(orderId, actor, input)
+}
+
+export function getShipmentLabel(
+  repository: FulfillmentRepository,
+  orderId: string,
+  actor: User,
+) {
+  return repository.getShipmentLabel(orderId, actor)
 }

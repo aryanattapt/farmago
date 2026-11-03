@@ -8,6 +8,9 @@ export type CreateProductRequestDto = {
   batchTrackingRequired?: boolean
   specialHandling?: boolean
   shippingWeightGrams?: number | string
+  shippingWidthCm?: number | string
+  shippingHeightCm?: number | string
+  shippingLengthCm?: number | string
 }
 
 export type ConfigureInventoryRequestDto = {
@@ -27,6 +30,9 @@ export type UpdateProductRequestDto = {
   batchTrackingRequired?: boolean | null
   specialHandling?: boolean | null
   shippingWeightGrams?: number | string | null
+  shippingWidthCm?: number | string | null
+  shippingHeightCm?: number | string | null
+  shippingLengthCm?: number | string | null
   status?: string
 }
 
@@ -37,9 +43,15 @@ export type CreatePharmacyRequestDto = {
   postalCodes?: unknown
   licenseReference?: string
   rajaongkirOriginId?: number | string | null
+  deliveryContactName?: string
+  deliveryPhone?: string
+  deliveryEmail?: string
 }
 
 export type UpdatePharmacyRequestDto = {
   status?: string
   rajaongkirOriginId?: number | string | null
+  deliveryContactName?: string | null
+  deliveryPhone?: string | null
+  deliveryEmail?: string | null
 }

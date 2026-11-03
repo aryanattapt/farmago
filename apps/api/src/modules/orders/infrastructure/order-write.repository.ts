@@ -55,8 +55,8 @@ export class PostgresOrderWriteRepository implements OrderWriteRepository {
       const itemSnapshots = quote.items_snapshot as any[]
       const ids = itemSnapshots.map((item) => item.productId)
       const locked = await client.query(
-        `SELECT p.id,p.name,p.category,p.sell_unit,p.requires_prescription,p.batch_tracking_required,p.status,p.special_handling,
-        i.on_hand,i.reserved,i.unit_price,i.sales_blocked,p.shipping_weight_grams FROM inventory i JOIN products p ON p.id=i.product_id
+        `SELECT p.id,p.name,p.category,p.sell_unit,p.requires_prescription,p.batch_tracking_required,p.status,p.special_handling,p.shipping_weight_grams,p.shipping_width_cm,p.shipping_height_cm,p.shipping_length_cm,
+        i.on_hand,i.reserved,i.unit_price,i.sales_blocked FROM inventory i JOIN products p ON p.id=i.product_id
         WHERE i.pharmacy_id=$1 AND p.id=ANY($2::uuid[]) ORDER BY p.id FOR UPDATE OF i`,
         [quote.pharmacy_id, ids],
       )
@@ -82,10 +82,23 @@ export class PostgresOrderWriteRepository implements OrderWriteRepository {
           sellUnit: row.sell_unit,
           requiresPrescription: row.requires_prescription,
           batchTrackingRequired: row.batch_tracking_required,
+          shippingWeightGrams: Number(row.shipping_weight_grams),
+          shippingWidthCm: row.shipping_width_cm == null ? null : Number(row.shipping_width_cm),
+          shippingHeightCm: row.shipping_height_cm == null ? null : Number(row.shipping_height_cm),
+          shippingLengthCm: row.shipping_length_cm == null ? null : Number(row.shipping_length_cm),
           unitPrice: amount(row.unit_price),
           lineTotal: money(cents(row.unit_price) * quantity),
         }
       })
+
+      if (
+        quote.fulfillment_method === 'delivery' &&
+        updatedItems.some((item: any) =>
+          ![item.shippingWidthCm, item.shippingHeightCm, item.shippingLengthCm]
+            .every((value: unknown) => Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= 200)
+        )
+      )
+        throw new OrderWriteError('quote-changed')
 
       let currentAddress: any = null
       if (quote.fulfillment_method === 'delivery') {
@@ -183,14 +196,18 @@ export class PostgresOrderWriteRepository implements OrderWriteRepository {
       const order = inserted.rows[0]
       for (const item of updatedItems) {
         const orderItem = await client.query(
-          `INSERT INTO order_items(order_id,product_id,product_name_snapshot,sell_unit_snapshot,batch_tracking_required_snapshot,requires_prescription_snapshot,quantity,unit_price,line_total)
-          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+          `INSERT INTO order_items(order_id,product_id,product_name_snapshot,sell_unit_snapshot,batch_tracking_required_snapshot,shipping_weight_grams_snapshot,shipping_width_cm_snapshot,shipping_height_cm_snapshot,shipping_length_cm_snapshot,requires_prescription_snapshot,quantity,unit_price,line_total)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
           [
             order.id,
             item.productId,
             item.name,
             item.sellUnit,
             item.batchTrackingRequired === true,
+            item.shippingWeightGrams,
+            item.shippingWidthCm,
+            item.shippingHeightCm,
+            item.shippingLengthCm,
             item.requiresPrescription,
             item.quantity,
             item.unitPrice,

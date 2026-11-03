@@ -16,3 +16,9 @@ export type FulfillmentCheckRequestDto = {
   pharmacistCheck?: boolean
   note?: string
 }
+
+export type ShipmentPickupRequestDto = {
+  pickupDate?: string
+  pickupTime?: string
+  pickupVehicle?: 'Motor' | 'Mobil' | 'Truk' | string
+}

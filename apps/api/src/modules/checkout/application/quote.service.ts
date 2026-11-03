@@ -47,6 +47,9 @@ type StockRow = {
   available: number
   sales_blocked: boolean
   shipping_weight_grams: number
+  shipping_width_cm: number | null
+  shipping_height_cm: number | null
+  shipping_length_cm: number | null
 }
 
 export interface CheckoutRepository {
@@ -78,6 +81,7 @@ export type BuildQuoteResult =
         | 'address-not-found'
         | 'address-destination-missing'
         | 'shipping-weight-missing'
+        | 'shipping-dimensions-missing'
         | 'shipping-origin-missing'
         | 'shipping-unavailable'
         | 'pharmacy-unavailable'
@@ -145,6 +149,11 @@ export async function buildCheckoutQuote(
       continue
 
     if (input.fulfillmentMethod === 'delivery') {
+      if (stock.some((row) =>
+        ![row.shipping_width_cm, row.shipping_height_cm, row.shipping_length_cm]
+          .every((value) => Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= 200)
+      ))
+        return { ok: false, reason: 'shipping-dimensions-missing' }
       if (!pharmacy.rajaongkir_origin_id) {
         missingShippingOrigin = true
         continue
@@ -288,6 +297,12 @@ export async function requestCheckoutQuote(
       422,
       'PRODUCT_WEIGHT_NOT_CONFIGURED',
       'Berat produk belum diatur atau total paket melewati batas. Minta admin memeriksa berat kemasan dalam gram.',
+    )
+  if (!result.ok && result.reason === 'shipping-dimensions-missing')
+    throw new ApplicationError(
+      422,
+      'PRODUCT_DIMENSIONS_NOT_CONFIGURED',
+      'Dimensi kemasan satu per satu produk belum diatur. Minta admin melengkapi lebar, tinggi, dan panjang dalam cm.',
     )
   if (!result.ok && result.reason === 'shipping-unavailable')
     throw new ApplicationError(

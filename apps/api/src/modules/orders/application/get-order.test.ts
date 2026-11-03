@@ -26,6 +26,7 @@ const model: OrderReadModel = {
   history: [],
   payment: null,
   fulfillmentCheck: null,
+  shipment: null,
 }
 
 const customer: User = {
