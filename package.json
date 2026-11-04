@@ -7,6 +7,7 @@
   "scripts": {
     "dev:web": "bun run --cwd apps/web dev",
     "dev:api": "bun run --cwd apps/api dev",
+    "dev:mobile": "bun run --cwd apps/mobile start",
     "test:api": "bun run --cwd apps/api test",
     "test:web": "bun run --cwd apps/web test",
     "build:api": "bun run --cwd apps/api build",
