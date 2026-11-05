@@ -11,6 +11,13 @@ import {
   uploadPrescriptionFile,
 } from '../../src/modules/prescriptions/public'
 import { runFulfillmentCommand, saveFulfillmentCheck } from '../../src/modules/fulfillment/public'
+import {
+  decideReturnRefund,
+  getReturnRefund,
+  listReturnRefunds,
+  markReturnRefunded,
+  submitReturnRefund,
+} from '../../src/modules/support/public'
 import type { User } from '../../src/shared/domain/access'
 
 const uploadedOrderIds: string[] = []
@@ -342,6 +349,88 @@ describe('PostgreSQL-backed API integration', () => {
       [order.id],
     )
     expect(shipmentCount.rows[0].count).toBe(1)
+
+    const completedHistory = await pool.query(
+      `SELECT id FROM order_status_history
+      WHERE order_id=$1 AND to_status='completed' ORDER BY created_at DESC LIMIT 1`,
+      [order.id],
+    )
+    const completionEventId = String(completedHistory.rows[0].id)
+    await pool.query(
+      "UPDATE order_status_history SET created_at=now()-interval '4 days' WHERE id=$1",
+      [completionEventId],
+    )
+    const expiredRefundEligibility = await getReturnRefund(order.id, fixture.customer) as {
+      eligible: boolean
+    }
+    expect(expiredRefundEligibility.eligible).toBe(false)
+    await expect(submitReturnRefund(order.id, fixture.customer, {
+      reason: 'Barang rusak',
+      bankName: 'BCA',
+      accountHolderName: 'Arya Paramita',
+      accountNumber: '12345678',
+    }, null)).rejects.toMatchObject({ status: 409, code: 'RETURN_WINDOW_EXPIRED' })
+
+    await pool.query(
+      "UPDATE order_status_history SET created_at=now()-interval '2 days 23 hours' WHERE id=$1",
+      [completionEventId],
+    )
+    const activeRefundEligibility = await getReturnRefund(order.id, fixture.customer) as {
+      eligible: boolean
+    }
+    expect(activeRefundEligibility.eligible).toBe(true)
+    const refundRequest = await submitReturnRefund(order.id, fixture.customer, {
+      reason: ' Barang rusak saat diterima. ',
+      bankName: ' BCA ',
+      accountHolderName: ' Arya Paramita ',
+      accountNumber: '1234-5678 90',
+    }, null) as { id: string; status: string; duplicate: boolean }
+    expect(refundRequest.status).toBe('requested')
+    expect(refundRequest.duplicate).toBe(false)
+    const duplicateRefundRequest = await submitReturnRefund(order.id, fixture.customer, {
+      reason: 'Barang rusak saat diterima.',
+      bankName: 'BCA',
+      accountHolderName: 'Arya Paramita',
+      accountNumber: '1234567890',
+    }, null) as { id: string; status: string; duplicate: boolean }
+    expect(duplicateRefundRequest).toMatchObject({ id: refundRequest.id, status: 'requested', duplicate: true })
+    expect(await listReturnRefunds(foreignStaff)).toEqual([])
+    expect(await listReturnRefunds(staff)).toHaveLength(1)
+
+    await expect(decideReturnRefund(refundRequest.id, staff, {
+      decision: 'approved',
+      refundAmount: Number(orderRow.rows[0].total) + 0.01,
+    })).rejects.toMatchObject({ status: 409, code: 'REFUND_LIMIT_EXCEEDED' })
+    const approvedRefund = await decideReturnRefund(refundRequest.id, staff, {
+      decision: 'approved',
+      reason: 'Sesuai pemeriksaan apotek.',
+      refundAmount: (Number(orderRow.rows[0].total) / 2).toFixed(2),
+    }) as { status: string; refundDueAt: Date | string }
+    expect(approvedRefund.status).toBe('approved')
+    expect(new Date(approvedRefund.refundDueAt).getTime()).toBeGreaterThan(
+      Date.now() + 6 * 24 * 60 * 60 * 1000,
+    )
+
+    await markReturnRefunded(refundRequest.id, staff, { transferReference: 'BANK-TRANSFER-42' })
+    await expect(markReturnRefunded(refundRequest.id, staff, {
+      transferReference: 'BANK-TRANSFER-42-RETRY',
+    })).rejects.toMatchObject({ status: 409, code: 'REFUND_NOT_APPROVED' })
+    const refunded = await pool.query(
+      `SELECT o.status,r.status AS refund_request_status,rf.status AS refund_status,
+        rf.provider_reference,r.account_number,r.bank_name,r.account_holder_name
+      FROM orders o JOIN return_refund_requests r ON r.order_id=o.id
+      JOIN refunds rf ON rf.id=r.refund_id WHERE o.id=$1`,
+      [order.id],
+    )
+    expect(refunded.rows[0]).toMatchObject({
+      status: 'completed',
+      refund_request_status: 'refunded',
+      refund_status: 'succeeded',
+      provider_reference: 'BANK-TRANSFER-42',
+      account_number: '1234567890',
+      bank_name: 'BCA',
+      account_holder_name: 'Arya Paramita',
+    })
   })
 })
 

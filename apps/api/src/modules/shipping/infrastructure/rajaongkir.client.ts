@@ -5,6 +5,7 @@ export type RajaOngkirConfig = {
   baseUrl: string
   couriers?: string[]
 }
+export type RajaOngkirFetch = (input: URL | RequestInfo, init?: RequestInit) => Promise<Response>
 
 export type RajaOngkirDestination = {
   id: number
@@ -28,7 +29,7 @@ export type RajaOngkirRate = {
 export class RajaOngkirClient {
   constructor(
     private readonly config: RajaOngkirConfig | null = loadRajaOngkirConfig(),
-    private readonly fetcher: typeof fetch = fetch,
+    private readonly fetcher: RajaOngkirFetch = fetch,
   ) {}
 
   async searchDomesticDestinations(search: string): Promise<RajaOngkirDestination[]> {

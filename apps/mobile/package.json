@@ -15,6 +15,7 @@
     "react-native-screens": "~4.26.0"
   },
   "devDependencies": {
+    "@types/bun": "1.4.4",
     "@types/react": "~19.2.2",
     "typescript": "~6.0.3"
   },
@@ -23,7 +24,9 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --coverage --coverage-reporter=lcov src",
+    "bundle:ci": "expo export --platform all --output-dir /tmp/farmago-mobile-export"
   },
   "private": true
 }

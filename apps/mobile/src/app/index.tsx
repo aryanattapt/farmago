@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, BackHandler, Linking, Platform, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
+import { classifyWebNavigation, webOrigin } from '../lib/navigation-policy';
 
 declare const process: { env: { EXPO_PUBLIC_WEB_URL?: string } };
 
@@ -9,10 +10,6 @@ const localWebUrl = Platform.select({
   android: 'http://10.0.2.2:5173',
   default: 'http://localhost:5173',
 }) ?? 'http://localhost:5173';
-
-function originOf(value: string) {
-  return value.match(/^https?:\/\/[^/]+/i)?.[0]?.toLowerCase() ?? '';
-}
 
 const absoluteFill = {
   position: 'absolute' as const,
@@ -31,7 +28,7 @@ export default function MobileWebApp() {
     () => process.env.EXPO_PUBLIC_WEB_URL?.trim() || localWebUrl,
     [],
   );
-  const appOrigin = useMemo(() => originOf(webUrl), [webUrl]);
+  const appOrigin = useMemo(() => webOrigin(webUrl), [webUrl]);
 
   useEffect(() => {
     if (Platform.OS !== 'android' || !canGoBack) return;
@@ -43,14 +40,9 @@ export default function MobileWebApp() {
   }, [canGoBack]);
 
   const handleNavigation = (request: { url: string }) => {
-    const scheme = request.url.split(':', 1)[0]?.toLowerCase();
-    if (scheme === 'about') return true;
-    if (scheme === 'http' || scheme === 'https') {
-      if (originOf(request.url) === appOrigin) return true;
-      void Linking.openURL(request.url).catch(() => setLoadError(true));
-      return false;
-    }
-    if (scheme === 'mailto' || scheme === 'tel') {
+    const decision = classifyWebNavigation(request.url, appOrigin);
+    if (decision === 'allow') return true;
+    if (decision === 'open-external') {
       void Linking.openURL(request.url).catch(() => setLoadError(true));
     }
     return false;

@@ -9,11 +9,10 @@ const config: RajaOngkirConfig = {
 
 describe('RajaOngkir API v2 client', () => {
   test('searches destinations with the API key header and normalizes valid location IDs', async () => {
-    let requestedUrl = ''
-    let requestedHeaders: Headers | null = null
+    const request: { url: string; headers: Headers } = { url: '', headers: new Headers() }
     const client = new RajaOngkirClient(config, async (input, init) => {
-      requestedUrl = String(input)
-      requestedHeaders = new Headers(init?.headers)
+      request.url = String(input)
+      request.headers = new Headers(init?.headers)
       return Response.json({
         meta: { code: 200, status: 'success' },
         data: [
@@ -23,9 +22,9 @@ describe('RajaOngkir API v2 client', () => {
       })
     })
     const results = await client.searchDomesticDestinations('  Kecamatan  ')
-    expect(new URL(requestedUrl).searchParams.get('search')).toBe('  Kecamatan  ')
-    expect(new URL(requestedUrl).searchParams.get('limit')).toBe('10')
-    expect(requestedHeaders?.get('key')).toBe('test-secret')
+    expect(new URL(request.url).searchParams.get('search')).toBe('  Kecamatan  ')
+    expect(new URL(request.url).searchParams.get('limit')).toBe('10')
+    expect(request.headers.get('key')).toBe('test-secret')
     expect(results).toEqual([{
       id: 123,
       label: 'Kelurahan, Kecamatan, Kota',
@@ -38,13 +37,15 @@ describe('RajaOngkir API v2 client', () => {
   })
 
   test('posts form-encoded costs and normalizes the available courier services', async () => {
-    let requestedUrl = ''
-    let requestedHeaders: Headers | null = null
-    let requestedBody = new URLSearchParams()
+    const request: { url: string; headers: Headers; body: URLSearchParams } = {
+      url: '',
+      headers: new Headers(),
+      body: new URLSearchParams(),
+    }
     const client = new RajaOngkirClient(config, async (input, init) => {
-      requestedUrl = String(input)
-      requestedHeaders = new Headers(init?.headers)
-      requestedBody = new URLSearchParams(String(init?.body))
+      request.url = String(input)
+      request.headers = new Headers(init?.headers)
+      request.body = new URLSearchParams(String(init?.body))
       return Response.json({
         meta: { code: 200, status: 'success' },
         data: [
@@ -54,10 +55,10 @@ describe('RajaOngkir API v2 client', () => {
       })
     })
     const rates = await client.calculateDomesticCost({ originId: 1, destinationId: 2, weightGrams: 750 })
-    expect(requestedUrl).toBe('https://rajaongkir.komerce.id/api/v1/calculate/domestic-cost')
-    expect(requestedHeaders?.get('key')).toBe('test-secret')
-    expect(requestedHeaders?.get('content-type')).toContain('application/x-www-form-urlencoded')
-    expect(Object.fromEntries(requestedBody.entries())).toEqual({
+    expect(request.url).toBe('https://rajaongkir.komerce.id/api/v1/calculate/domestic-cost')
+    expect(request.headers.get('key')).toBe('test-secret')
+    expect(request.headers.get('content-type')).toContain('application/x-www-form-urlencoded')
+    expect(Object.fromEntries(request.body.entries())).toEqual({
       origin: '1', destination: '2', weight: '750', courier: 'jne:sicepat', price: 'lowest',
     })
     expect(rates.map((rate) => rate.cost)).toEqual([12000, 9000])

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../shared/api/client.js'
 import { money } from '../../shared/lib/formatters.js'
+import { canSubmitReturnRefund } from './return-refund-policy.js'
 
 const statusLabel = {
   requested: 'Menunggu pemeriksaan apotek',
@@ -84,7 +85,7 @@ export function ReturnRefundForm({ order, csrf, onToast }) {
           <label>Nama pemilik rekening<input required maxLength="120" value={accountHolderName} onChange={(event) => setAccountHolderName(event.target.value)} placeholder="Sesuai nama di rekening"/></label>
           <label>Nomor rekening<input required inputMode="numeric" pattern="[0-9 -]{6,40}" maxLength="40" value={accountNumber} onChange={(event) => setAccountNumber(event.target.value)} placeholder="Nomor rekening tujuan"/></label>
           {eligibility.requiresVideo && <label>Video unboxing<input required type="file" accept="video/mp4,video/webm" onChange={(event) => setVideo(event.target.files?.[0] || null)}/><small>Format MP4/WebM · maks. 25 MB.</small></label>}
-          <button className="button button-outline full-width" disabled={busy || reason.trim().length < 3 || !bankName.trim() || !accountHolderName.trim() || !accountNumber.trim() || (eligibility.requiresVideo && !video)}>{busy ? 'Mengirim…' : 'Ajukan refund'}</button>
+          <button className="button button-outline full-width" disabled={!canSubmitReturnRefund({busy,reason,bankName,accountHolderName,accountNumber,requiresVideo:eligibility.requiresVideo,video})}>{busy ? 'Mengirim…' : 'Ajukan refund'}</button>
           <small>Pengajuan harus masuk paling lambat 3 hari setelah barang diterima. Jika disetujui, apotek memproses transfer manual maksimal 7 hari.</small>
         </form>
       : !request || request.status === 'rejected'

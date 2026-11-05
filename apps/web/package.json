@@ -6,7 +6,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "bun test src"
+    "test": "bun test --coverage --coverage-reporter=lcov src"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.4",

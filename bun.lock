@@ -19,6 +19,7 @@
       "devDependencies": {
         "@types/bun": "latest",
         "@types/pg": "^8.15.5",
+        "typescript": "~6.0.3",
       },
     },
     "apps/mobile": {
@@ -37,6 +38,7 @@
         "react-native-webview": "13.16.1",
       },
       "devDependencies": {
+        "@types/bun": "1.4.4",
         "@types/react": "~19.2.2",
         "typescript": "~6.0.3",
       },

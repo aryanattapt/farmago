@@ -2,6 +2,7 @@ import { ApplicationError } from '../../../shared/application-error'
 
 export type KomerceDeliveryConfig = { apiKey: string; baseUrl: string }
 export type KomerceStoreOrderPayload = Record<string, unknown>
+export type KomerceFetch = (input: URL | RequestInfo, init?: RequestInit) => Promise<Response>
 export type KomercePickupPayload = {
   pickup_date: string
   pickup_time: string
@@ -22,7 +23,7 @@ export class KomerceDeliveryError extends Error {
 export class KomerceDeliveryClient {
   constructor(
     private readonly config: KomerceDeliveryConfig | null = loadKomerceDeliveryConfig(),
-    private readonly fetcher: typeof fetch = fetch,
+    private readonly fetcher: KomerceFetch = fetch,
   ) {}
 
   isConfigured() {
