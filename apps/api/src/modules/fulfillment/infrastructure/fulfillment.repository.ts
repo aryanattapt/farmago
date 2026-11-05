@@ -334,7 +334,15 @@ export class PostgresFulfillmentRepository implements FulfillmentRepository {
         fail(409, 'DELIVERY_BOOKING_REVIEW_REQUIRED', 'Hasil booking sebelumnya belum pasti. Periksa dashboard Komerce sebelum mencoba lagi.')
       if (shipment && ['booked','pickup_pending','pickup_unknown','pickup_requested','pickup_failed'].includes(shipment.status))
         return { alreadyBooked: true as const, shipmentId: shipment.id, providerOrderNo: shipment.provider_order_no, status: shipment.status, trackingNumber: shipment.tracking_number }
-      if (shipment && !['pending','booking_failed'].includes(shipment.status))
+      if (shipment?.status === 'booking_cancelled') {
+        const openCancellation = await client.query(
+          "SELECT 1 FROM cancellation_requests WHERE order_id=$1 AND status='requested' LIMIT 1",
+          [orderId],
+        )
+        if (openCancellation.rowCount)
+          fail(409, 'CANCELLATION_REQUEST_PENDING', 'Tuntaskan permintaan pembatalan sebelum membuat booking kurir baru.')
+      }
+      if (shipment && !['pending','booking_failed','booking_cancelled'].includes(shipment.status))
         fail(409, 'DELIVERY_BOOKING_STATE_INVALID', 'Status pengiriman tidak mengizinkan pembuatan order kurir baru.')
       const snapshot = typeof order.shipping_snapshot === 'string'
         ? JSON.parse(order.shipping_snapshot)

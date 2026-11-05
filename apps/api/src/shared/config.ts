@@ -1,5 +1,12 @@
 export const API = '/api/v1'
 export const WEB_ORIGIN = process.env.WEB_ORIGIN ?? 'http://localhost:5173'
+export const WEB_ORIGINS = new Set(
+  (process.env.WEB_ORIGINS ?? WEB_ORIGIN)
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+    .map((origin) => new URL(origin).origin),
+)
 export const SESSION_SECONDS = 60 * 60 * 24 * 7
 export const RESERVATION_MINUTES = Math.max(5, Number(process.env.RESERVATION_MINUTES ?? 30))
 export const UPLOAD_MAX_BYTES = Number(process.env.UPLOAD_MAX_BYTES ?? 8 * 1024 * 1024)

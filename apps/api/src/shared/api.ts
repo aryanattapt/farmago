@@ -15,6 +15,7 @@ import {
   SESSION_SECONDS,
   UPLOAD_MAX_BYTES,
   WEB_ORIGIN,
+  WEB_ORIGINS,
   secureCookie,
   serviceFee,
 } from './config'
@@ -27,6 +28,7 @@ export {
   SESSION_SECONDS,
   UPLOAD_MAX_BYTES,
   WEB_ORIGIN,
+  WEB_ORIGINS,
   secureCookie,
   serviceFee,
 }

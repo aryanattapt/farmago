@@ -44,6 +44,7 @@ export interface PrescriptionRepository {
   upload(orderId: string, actor: User, input: PrescriptionUploadInput): Promise<unknown>
   findFile(prescriptionId: string): Promise<PrescriptionFile | null>
   recordFileViewed(prescriptionId: string, actorId: string): Promise<void>
+  recordFileAccessDenied(prescriptionId: string, actorId: string, reason: string): Promise<void>
   review(prescriptionId: string, actor: User, input: PrescriptionReviewInput): Promise<unknown>
   findMessageOrder(orderId: string): Promise<PrescriptionMessageOrder | null>
   listMessages(
@@ -113,9 +114,14 @@ export async function readPrescriptionFile(
   const prescription = await repository.findFile(prescriptionId)
   if (!prescription) throw new ApplicationError(404, 'NOT_FOUND', 'Berkas tidak ditemukan.')
   if (prescription.customer_id !== user.id) {
-    if (!hasRole(user, 'pharmacist'))
+    if (!hasRole(user, 'pharmacist')) {
+      await repository.recordFileAccessDenied(prescription.id, user.id, 'pharmacist_role_required')
       throw new ApplicationError(403, 'FORBIDDEN', 'Akses berkas tidak diizinkan.')
-    checkPharmacyScope(user, prescription.pharmacy_id)
+    }
+    if (!canAccessPharmacy(user, prescription.pharmacy_id)) {
+      await repository.recordFileAccessDenied(prescription.id, user.id, 'pharmacy_scope_mismatch')
+      checkPharmacyScope(user, prescription.pharmacy_id)
+    }
   }
   const filePath = join(process.cwd(), 'storage', 'prescriptions', prescription.object_key)
   if (!(await Bun.file(filePath).exists()))

@@ -42,6 +42,8 @@ jobs:
         run: bun run --cwd apps/web test
       - name: Build web
         run: bun run --cwd apps/web build
+      - name: Typecheck mobile app
+        run: bun run --cwd apps/mobile typecheck
       - name: Apply PostgreSQL migrations for integration tests
         working-directory: apps/api
         env:

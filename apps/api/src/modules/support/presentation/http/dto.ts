@@ -1,5 +1,6 @@
 export type {
   CancellationDecisionDto as CancellationDecisionRequestDto,
+  CourierBookingCancellationDto as CourierBookingCancellationRequestDto,
   CancellationRequestDto,
   CreateSupportCaseDto as CreateSupportCaseRequestDto,
   UpdateSupportCaseDto as UpdateSupportCaseRequestDto,

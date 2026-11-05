@@ -19,20 +19,20 @@ export class PostgresSupportRepository implements SupportRepository {
   requestCancellation(orderId: string, actorId: string, reason: string, canModerate: boolean) {
     return transaction(async (client) => {
       const order = await client.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [orderId])
-      if (!order.rowCount) return { ok: false, reason: 'not-found' as const }
+      if (!order.rowCount) return { ok: false as const, reason: 'not-found' as const }
       if (order.rows[0].customer_id !== actorId && !canModerate)
-        return { ok: false, reason: 'forbidden' as const }
+        return { ok: false as const, reason: 'forbidden' as const }
       if (
         !['awaiting_prescription', 'awaiting_payment', 'paid', 'processing', 'ready'].includes(
           order.rows[0].status,
         )
       )
-        return { ok: false, reason: 'cancellation-not-allowed' as const }
+        return { ok: false as const, reason: 'cancellation-not-allowed' as const }
       const existing = await client.query(
         "SELECT id,status FROM cancellation_requests WHERE order_id=$1 AND status='requested'",
         [orderId],
       )
-      if (existing.rowCount) return { ok: true, value: existing.rows[0] }
+      if (existing.rowCount) return { ok: true as const, value: existing.rows[0] }
       const saved = await client.query(
         'INSERT INTO cancellation_requests(order_id,requested_by,reason) VALUES($1,$2,$3) RETURNING id,status',
         [orderId, actorId, reason],
@@ -40,24 +40,44 @@ export class PostgresSupportRepository implements SupportRepository {
       await recordAudit(client, actorId, 'cancellation.requested', 'order', orderId, {
         requestId: saved.rows[0].id,
       })
-      return { ok: true, value: saved.rows[0] }
+      return { ok: true as const, value: saved.rows[0] }
     })
   }
 
   decideCancellation(requestId: string, actorId: string, input: CancellationDecisionDto) {
     return transaction(async (client) => {
       const request = await client.query(
-        'SELECT cr.*,o.status AS order_status,o.pharmacy_id FROM cancellation_requests cr JOIN orders o ON o.id=cr.order_id WHERE cr.id=$1 FOR UPDATE OF cr,o',
+        'SELECT cr.*,o.status AS order_status,o.pharmacy_id,o.fulfillment_method AS order_fulfillment_method FROM cancellation_requests cr JOIN orders o ON o.id=cr.order_id WHERE cr.id=$1 FOR UPDATE OF cr,o',
         [requestId],
       )
-      if (!request.rowCount) return { ok: false, reason: 'not-found' as const }
+      if (!request.rowCount) return { ok: false as const, reason: 'not-found' as const }
       if (request.rows[0].status !== 'requested')
-        return { ok: false, reason: 'already-decided' as const }
+        return { ok: false as const, reason: 'already-decided' as const }
       const approved = input.decision === 'approved'
       if (!approved && input.decision !== 'rejected')
-        return { ok: false, reason: 'invalid-decision' as const }
+        return { ok: false as const, reason: 'invalid-decision' as const }
       if (approved && !canTransitionOrder(request.rows[0].order_status, 'cancelled'))
-        return { ok: false, reason: 'cancellation-not-allowed' as const }
+        return { ok: false as const, reason: 'cancellation-not-allowed' as const }
+      if (approved && request.rows[0].order_fulfillment_method === 'delivery') {
+        const shipment = await client.query(
+          'SELECT id,status,provider_order_no,booking_cancellation_reference,handed_over_at FROM shipments WHERE order_id=$1 FOR UPDATE',
+          [request.rows[0].order_id],
+        )
+        if (shipment.rowCount) {
+          const current = shipment.rows[0]
+          const safeStatuses = new Set(['pending', 'booking_failed', 'booking_cancelled'])
+          const confirmedProviderCancellation =
+            current.status === 'booking_cancelled' &&
+            String(current.booking_cancellation_reference ?? '').trim().length >= 3
+          if (
+            current.handed_over_at ||
+            !safeStatuses.has(current.status) ||
+            (current.status === 'booking_cancelled' && !confirmedProviderCancellation) ||
+            (current.provider_order_no && !confirmedProviderCancellation)
+          )
+            return { ok: false as const, reason: 'delivery-booking-active' as const }
+        }
+      }
       const status = approved ? 'approved' : 'rejected'
       await client.query(
         'UPDATE cancellation_requests SET status=$2,decided_by=$3,decision_reason=$4,decided_at=now() WHERE id=$1',
@@ -106,7 +126,83 @@ export class PostgresSupportRepository implements SupportRepository {
           decision: status,
         },
       )
-      return { ok: true, value: { id: requestId, status } }
+      return { ok: true as const, value: { id: requestId, status } }
+    })
+  }
+
+  getCancellationRequest(orderId: string, actor: User) {
+    return transaction(async (client) => {
+      const order = await client.query('SELECT customer_id FROM orders WHERE id=$1', [orderId])
+      if (!order.rowCount)
+        throw new ApplicationError(404, 'NOT_FOUND', 'Pesanan tidak ditemukan.')
+      if (order.rows[0].customer_id !== actor.id)
+        throw new ApplicationError(403, 'FORBIDDEN', 'Pesanan ini bukan milik Anda.')
+      const result = await client.query(
+        `SELECT id,reason,status,decision_reason,created_at,decided_at
+         FROM cancellation_requests WHERE order_id=$1 ORDER BY created_at DESC LIMIT 1`,
+        [orderId],
+      )
+      return result.rows[0] ?? null
+    })
+  }
+
+  recordCourierBookingCancellation(
+    orderId: string,
+    actorId: string,
+    providerCancellationReference: string,
+  ) {
+    return transaction(async (client) => {
+      const order = await client.query(
+        'SELECT id,status,fulfillment_method FROM orders WHERE id=$1 FOR UPDATE',
+        [orderId],
+      )
+      if (!order.rowCount) return { ok: false as const, reason: 'not-found' as const }
+      if (!canTransitionOrder(order.rows[0].status, 'cancelled'))
+        return { ok: false as const, reason: 'handover-already-recorded' as const }
+      const pending = await client.query(
+        "SELECT id FROM cancellation_requests WHERE order_id=$1 AND status='requested' LIMIT 1",
+        [orderId],
+      )
+      if (!pending.rowCount)
+        return { ok: false as const, reason: 'cancellation-request-not-open' as const }
+      if (order.rows[0].fulfillment_method !== 'delivery')
+        return { ok: false as const, reason: 'shipment-state-unresolved' as const }
+      const selected = await client.query(
+        'SELECT id,status,provider_order_no,handed_over_at FROM shipments WHERE order_id=$1 FOR UPDATE',
+        [orderId],
+      )
+      if (!selected.rowCount) return { ok: false as const, reason: 'shipment-state-unresolved' as const }
+      const shipment = selected.rows[0]
+      const reconcilableStatuses = new Set([
+        'booking_unknown',
+        'booked',
+        'pickup_unknown',
+        'pickup_requested',
+        'pickup_failed',
+      ])
+      if (
+        shipment.handed_over_at ||
+        !reconcilableStatuses.has(shipment.status)
+      )
+        return { ok: false as const, reason: 'shipment-state-unresolved' as const }
+      await client.query(
+        `UPDATE shipments SET status='booking_cancelled',booking_cancellation_reference=$2,
+          booking_cancelled_at=now(),booking_cancelled_by=$3 WHERE id=$1`,
+        [shipment.id, providerCancellationReference, actorId],
+      )
+      await recordAudit(
+        client,
+        actorId,
+        'shipment.booking_cancelled_confirmed',
+        'order',
+        orderId,
+        {
+          shipmentId: shipment.id,
+          providerOrderNo: shipment.provider_order_no,
+          providerCancellationReference,
+        },
+      )
+      return { ok: true as const, value: { orderId, status: 'booking_cancelled' } }
     })
   }
 
@@ -495,9 +591,9 @@ export class PostgresSupportRepository implements SupportRepository {
   ) {
     return transaction(async (client) => {
       const order = await client.query('SELECT customer_id FROM orders WHERE id=$1', [orderId])
-      if (!order.rowCount) return { ok: false, reason: 'not-found' as const }
+      if (!order.rowCount) return { ok: false as const, reason: 'not-found' as const }
       if (order.rows[0].customer_id !== actorId && !canOpenForOthers)
-        return { ok: false, reason: 'forbidden' as const }
+        return { ok: false as const, reason: 'forbidden' as const }
       const result = await client.query(
         'INSERT INTO support_cases(order_id,opened_by,category,description) VALUES($1,$2,$3,$4) RETURNING id,status,created_at',
         [
@@ -510,7 +606,7 @@ export class PostgresSupportRepository implements SupportRepository {
       await recordAudit(client, actorId, 'support.opened', 'support_case', result.rows[0].id, {
         orderId,
       })
-      return { ok: true, value: result.rows[0] }
+      return { ok: true as const, value: result.rows[0] }
     })
   }
 
@@ -520,17 +616,17 @@ export class PostgresSupportRepository implements SupportRepository {
         "SELECT 1 FROM user_roles WHERE user_id=$1 AND role IN ('admin','cs','finance') LIMIT 1",
         [assignedTo],
       )
-      if (!assignee.rowCount) return { ok: false, reason: 'invalid-assignee' as const }
+      if (!assignee.rowCount) return { ok: false as const, reason: 'invalid-assignee' as const }
       const result = await client.query(
         'UPDATE support_cases SET status=$2,assigned_to=$3,updated_at=now() WHERE id=$1 RETURNING id,status,updated_at',
         [caseId, input.status, assignedTo],
       )
-      if (!result.rowCount) return { ok: false, reason: 'not-found' as const }
+      if (!result.rowCount) return { ok: false as const, reason: 'not-found' as const }
       await recordAudit(client, actorId, 'support.updated', 'support_case', caseId, {
         status: input.status,
         assignedTo,
       })
-      return { ok: true, value: result.rows[0] }
+      return { ok: true as const, value: result.rows[0] }
     })
   }
 }

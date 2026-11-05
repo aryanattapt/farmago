@@ -6,6 +6,7 @@ import {
   orders,
   pharmacies,
   products,
+  shipments,
   supportCases,
   users,
 } from '../../../infrastructure/database/schema'
@@ -115,6 +116,8 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
         status: cancellationRequests.status,
         created_at: cancellationRequests.createdAt,
         order_status: orders.status,
+        fulfillment_method: orders.fulfillmentMethod,
+        shipment_status: shipments.status,
         total: orders.total,
         customer_name: users.name,
         pharmacy_name: pharmacies.name,
@@ -123,6 +126,7 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
       .innerJoin(orders, eq(orders.id, cancellationRequests.orderId))
       .innerJoin(users, eq(users.id, orders.customerId))
       .innerJoin(pharmacies, eq(pharmacies.id, orders.pharmacyId))
+      .leftJoin(shipments, eq(shipments.orderId, orders.id))
       .where(eq(cancellationRequests.status, 'requested'))
       .orderBy(asc(cancellationRequests.createdAt))
   }
@@ -172,7 +176,11 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
           input.specialHandling === true,
         ],
       )
-      await recordAudit(client, actorId, 'product.created', 'product', result.rows[0].id, {})
+      await recordAudit(client, actorId, 'product.created', 'product', result.rows[0].id, {
+        sku: values.sku,
+        status: 'inactive',
+        fields: ['sku', 'name', 'description', 'category', 'sellUnit', 'shippingDimensions', 'productFlags'],
+      })
       return result.rows[0]
     })
   }
@@ -238,6 +246,14 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
     input: UpdateProductRequestDto,
   ): Promise<AdministrationResult<unknown>> {
     return transaction(async (client) => {
+      const beforeResult = await client.query(
+        `SELECT id,name,description,category,sell_unit,requires_prescription,batch_tracking_required,
+          special_handling,shipping_weight_grams,shipping_width_cm,shipping_height_cm,shipping_length_cm,status
+         FROM products WHERE id=$1 FOR UPDATE`,
+        [productId],
+      )
+      if (!beforeResult.rowCount) return { ok: false, reason: 'not-found' }
+      const before = beforeResult.rows[0]
       const result = await client.query(
         `UPDATE products SET name=COALESCE($2,name),description=COALESCE($3,description),category=COALESCE($4,category),
         sell_unit=COALESCE($5,sell_unit),requires_prescription=COALESCE($6,requires_prescription),batch_tracking_required=COALESCE($7,batch_tracking_required),special_handling=COALESCE($8,special_handling),
@@ -258,8 +274,28 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
           input.status ?? null,
         ],
       )
-      if (!result.rowCount) return { ok: false, reason: 'not-found' }
-      await recordAudit(client, actorId, 'product.updated', 'product', result.rows[0].id, {})
+      const columns: Record<string, string> = {
+        name: 'name',
+        description: 'description',
+        category: 'category',
+        sellUnit: 'sell_unit',
+        requiresPrescription: 'requires_prescription',
+        batchTrackingRequired: 'batch_tracking_required',
+        specialHandling: 'special_handling',
+        shippingWeightGrams: 'shipping_weight_grams',
+        shippingWidthCm: 'shipping_width_cm',
+        shippingHeightCm: 'shipping_height_cm',
+        shippingLengthCm: 'shipping_length_cm',
+        status: 'status',
+      }
+      const changedFields = Object.entries(input)
+        .filter(([field, value]) => value !== undefined && value !== null &&
+          String(before[columns[field]]) !== String(value))
+        .map(([field]) => field)
+      await recordAudit(client, actorId, 'product.updated', 'product', result.rows[0].id, {
+        changedFields,
+        ...(input.status !== undefined ? { fromStatus: before.status, toStatus: result.rows[0].status } : {}),
+      })
       return { ok: true, value: result.rows[0] }
     })
   }
@@ -283,7 +319,11 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
           values.deliveryEmail,
         ],
       )
-      await recordAudit(client, actorId, 'pharmacy.created', 'pharmacy', result.rows[0].id, {})
+      await recordAudit(client, actorId, 'pharmacy.created', 'pharmacy', result.rows[0].id, {
+        status: 'pending',
+        postalCodeCount: values.postalCodes.length,
+        hasShippingOrigin: values.rajaongkirOriginId != null,
+      })
       return result.rows[0]
     })
   }
@@ -296,23 +336,36 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
     deliveryContact?: Partial<{ deliveryContactName: string | null; deliveryPhone: string | null; deliveryEmail: string | null }>,
   ): Promise<AdministrationResult<unknown>> {
     return transaction(async (client) => {
+      const currentResult = await client.query(
+        `SELECT id,status,license_reference,rajaongkir_origin_id,delivery_contact_name,delivery_phone,
+          delivery_email,cardinality(postal_codes) AS postal_count
+         FROM pharmacies WHERE id=$1 FOR UPDATE`,
+        [pharmacyId],
+      )
+      if (!currentResult.rowCount) return { ok: false, reason: 'not-found' }
+      const current = currentResult.rows[0]
       if (status === 'active') {
         const readiness = await client.query(
-          `SELECT p.license_reference,p.rajaongkir_origin_id,p.delivery_contact_name,p.delivery_phone,p.delivery_email,cardinality(p.postal_codes) AS postal_count,
-          COUNT(DISTINCT i.product_id) AS inventory_count,COUNT(DISTINCT h.weekday) AS service_days
-          FROM pharmacies p LEFT JOIN inventory i ON i.pharmacy_id=p.id LEFT JOIN pharmacy_service_hours h ON h.pharmacy_id=p.id AND h.service_type='prescription' AND h.active=true
-          WHERE p.id=$1 GROUP BY p.id`,
+          `SELECT
+            (SELECT COUNT(*) FROM inventory i WHERE i.pharmacy_id=p.id) AS inventory_count,
+            (SELECT COUNT(DISTINCT h.weekday) FROM pharmacy_service_hours h
+             WHERE h.pharmacy_id=p.id AND h.service_type='prescription' AND h.active=true) AS service_days
+           FROM pharmacies p WHERE p.id=$1`,
           [pharmacyId],
         )
-        if (!readiness.rowCount) return { ok: false, reason: 'not-found' }
         const gate = readiness.rows[0]
+        const contact = (field: 'deliveryContactName' | 'deliveryPhone' | 'deliveryEmail', column: string) =>
+          deliveryContact && Object.prototype.hasOwnProperty.call(deliveryContact, field)
+            ? deliveryContact[field]
+            : current[column]
+        const effectiveOriginId = originId === undefined ? current.rajaongkir_origin_id : originId
         if (
-          !String(gate.license_reference ?? '').trim() ||
-          Number(gate.postal_count) < 1 ||
-          !gate.rajaongkir_origin_id ||
-          !String(gate.delivery_contact_name ?? '').trim() ||
-          !String(gate.delivery_phone ?? '').trim() ||
-          !String(gate.delivery_email ?? '').trim() ||
+          !String(current.license_reference ?? '').trim() ||
+          Number(current.postal_count) < 1 ||
+          !effectiveOriginId ||
+          !String(contact('deliveryContactName', 'delivery_contact_name') ?? '').trim() ||
+          !String(contact('deliveryPhone', 'delivery_phone') ?? '').trim() ||
+          !String(contact('deliveryEmail', 'delivery_email') ?? '').trim() ||
           Number(gate.inventory_count) < 1 ||
           Number(gate.service_days) < 1
         )
@@ -335,15 +388,29 @@ export class PostgresAdministrationRepository implements AdministrationRepositor
         `UPDATE pharmacies SET ${assignments.join(',')} WHERE id=$1 RETURNING id,name,status,rajaongkir_origin_id,delivery_contact_name,delivery_phone,delivery_email`,
         values,
       )
-      if (!result.rowCount) return { ok: false, reason: 'not-found' }
       if (status !== null)
-        await recordAudit(client, actorId, 'pharmacy.status_changed', 'pharmacy', pharmacyId, { status })
+        await recordAudit(client, actorId, 'pharmacy.status_changed', 'pharmacy', pharmacyId, {
+          fromStatus: current.status,
+          toStatus: status,
+        })
       if (originId !== undefined)
         await recordAudit(client, actorId, 'pharmacy.shipping_origin_changed', 'pharmacy', pharmacyId, {
+          fromOriginId: current.rajaongkir_origin_id,
           originId,
         })
-      if (deliveryContact)
-        await recordAudit(client, actorId, 'pharmacy.delivery_contact_changed', 'pharmacy', pharmacyId, {})
+      if (deliveryContact) {
+        const contactColumns: Record<string, string> = {
+          deliveryContactName: 'delivery_contact_name',
+          deliveryPhone: 'delivery_phone',
+          deliveryEmail: 'delivery_email',
+        }
+        const changedFields = Object.entries(deliveryContact)
+          .filter(([field, value]) => String(current[contactColumns[field]] ?? '') !== String(value ?? ''))
+          .map(([field]) => field)
+        await recordAudit(client, actorId, 'pharmacy.delivery_contact_changed', 'pharmacy', pharmacyId, {
+          changedFields,
+        })
+      }
       return { ok: true, value: result.rows[0] }
     })
   }

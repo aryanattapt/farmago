@@ -4,7 +4,7 @@ import {
   API,
   ApiError,
   MAX_REQUEST_BODY_BYTES,
-  WEB_ORIGIN,
+  WEB_ORIGINS,
   apiError,
   cookieValue,
   errorJson,
@@ -95,8 +95,9 @@ function notFoundResponse(requestId: string) {
 
 function withResponseHeaders(response: Response, request: Request, state: RequestState) {
   response.headers.set('x-request-id', state.requestId)
-  if (request.headers.get('origin') === WEB_ORIGIN) {
-    response.headers.set('access-control-allow-origin', WEB_ORIGIN)
+  const origin = request.headers.get('origin')
+  if (origin && WEB_ORIGINS.has(origin)) {
+    response.headers.set('access-control-allow-origin', origin)
     response.headers.set('access-control-allow-credentials', 'true')
     response.headers.append('vary', 'Origin')
   }
@@ -121,15 +122,19 @@ function toApiError(error: unknown): ApiError {
   return new ApiError(500, 'INTERNAL_ERROR', 'Terjadi gangguan. Coba lagi atau hubungi bantuan.')
 }
 
-function preflightResponse() {
+function preflightResponse(origin: string | null) {
+  const headers = new Headers({
+    'access-control-allow-methods': 'GET,POST,PATCH,OPTIONS',
+    'access-control-allow-headers': 'content-type,x-csrf-token,idempotency-key',
+  })
+  if (origin && WEB_ORIGINS.has(origin)) {
+    headers.set('access-control-allow-origin', origin)
+    headers.set('access-control-allow-credentials', 'true')
+    headers.set('vary', 'Origin')
+  }
   return new Response(null, {
     status: 204,
-    headers: {
-      'access-control-allow-origin': WEB_ORIGIN,
-      'access-control-allow-credentials': 'true',
-      'access-control-allow-methods': 'GET,POST,PATCH,OPTIONS',
-      'access-control-allow-headers': 'content-type,x-csrf-token,idempotency-key',
-    },
+    headers,
   })
 }
 
@@ -144,9 +149,9 @@ export function createApiApp() {
       requestStates.set(request, state)
 
       const origin = request.headers.get('origin')
-      if (origin && origin !== WEB_ORIGIN)
+      if (origin && !WEB_ORIGINS.has(origin))
         return new Response('Origin tidak diizinkan.', { status: 403 })
-      if (request.method === 'OPTIONS') return preflightResponse()
+      if (request.method === 'OPTIONS') return preflightResponse(origin)
 
       const pathname = new URL(request.url).pathname
       if (!pathname.startsWith(API + '/')) return
@@ -251,6 +256,8 @@ export function createApiApp() {
     { method: 'POST', path: '/return-refund-requests/:requestId/decision', handler: createAuthenticatedEndpoint(handleSupportRoutes) },
     { method: 'POST', path: '/return-refund-requests/:requestId/manual-refund', handler: createAuthenticatedEndpoint(handleSupportRoutes) },
     { method: 'POST', path: '/orders/:orderId/cancellation-requests', handler: createAuthenticatedEndpoint(handleSupportRoutes) },
+    { method: 'GET', path: '/orders/:orderId/cancellation-requests', handler: createAuthenticatedEndpoint(handleSupportRoutes) },
+    { method: 'POST', path: '/orders/:orderId/shipment-booking-cancellation', handler: createAuthenticatedEndpoint(handleSupportRoutes) },
     { method: 'POST', path: '/cancellation-requests/:requestId/decision', handler: createAuthenticatedEndpoint(handleSupportRoutes) },
     { method: 'GET', path: '/orders/:orderId/support-cases', handler: createAuthenticatedEndpoint(handleSupportRoutes) },
     { method: 'POST', path: '/orders/:orderId/support-cases', handler: createAuthenticatedEndpoint(handleSupportRoutes) },

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, sql } from 'drizzle-orm'
 import { db, transaction } from '../../../infrastructure/database/client'
 import {
   auditLog,
@@ -108,6 +108,16 @@ export class PostgresPrescriptionRepository implements PrescriptionRepository {
       resourceType: 'prescription',
       resourceId: prescriptionId,
       metadata: {},
+    })
+  }
+
+  async recordFileAccessDenied(prescriptionId: string, actorId: string, reason: string) {
+    await db.insert(auditLog).values({
+      actorId,
+      action: 'prescription.access_denied',
+      resourceType: 'prescription',
+      resourceId: prescriptionId,
+      metadata: { reason },
     })
   }
 
@@ -285,7 +295,7 @@ export class PostgresPrescriptionRepository implements PrescriptionRepository {
         id: prescriptionMessages.id,
         author_id: prescriptionMessages.authorId,
         message_type: prescriptionMessages.messageType,
-        body: prescriptionMessages.body,
+        body: sql<string>`COALESCE(${prescriptionMessages.body}, '')`,
         created_at: prescriptionMessages.createdAt,
       })
       .from(prescriptionMessages)

@@ -12,6 +12,8 @@ import {
   listSupportCases,
   requestCancellation,
   updateSupportCaseById,
+  getCancellationRequest,
+  recordCourierBookingCancellation,
 } from '../../public'
 import type {
   CancellationDecisionRequestDto,
@@ -21,6 +23,7 @@ import type {
   ReturnRefundRequestRequestDto,
   ReturnRefundDecisionRequestDto,
   ManualRefundCompletionRequestDto,
+  CourierBookingCancellationRequestDto,
 } from './dto'
 
 const { apiError, body, json, limit, requireRole } = shared
@@ -87,10 +90,19 @@ export async function handleSupportRoutes({
   }
 
   const cancellationMatch = path.match(/^\/orders\/([0-9a-f-]+)\/cancellation-requests$/i)
+  if (cancellationMatch && method === 'GET')
+    return json({ request: await getCancellationRequest(cancellationMatch[1], currentUser) })
   if (cancellationMatch && method === 'POST') {
     const input = await body<CancellationRequestDto>(request)
     const result = await requestCancellation(cancellationMatch[1], currentUser, input)
     return json(result, 201)
+  }
+  const bookingCancellationMatch = path.match(/^\/orders\/([0-9a-f-]+)\/shipment-booking-cancellation$/i)
+  if (bookingCancellationMatch && method === 'POST') {
+    requireRole(currentUser, 'cs', 'admin')
+    limit(request, 'shipment-booking-cancellation', 10, currentUser.id)
+    const input = await body<CourierBookingCancellationRequestDto>(request)
+    return json(await recordCourierBookingCancellation(bookingCancellationMatch[1], currentUser, input))
   }
   const cancellationDecision = path.match(/^\/cancellation-requests\/([0-9a-f-]+)\/decision$/i)
   if (cancellationDecision && method === 'POST') {

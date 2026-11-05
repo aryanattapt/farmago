@@ -7,6 +7,10 @@ export type CancellationDecisionDto = {
   reason?: string
 }
 
+export type CourierBookingCancellationDto = {
+  providerCancellationReference?: string
+}
+
 export type ReturnRefundRequestDto = {
   reason?: string
   bankName?: string

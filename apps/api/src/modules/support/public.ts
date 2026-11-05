@@ -1,5 +1,7 @@
 import {
   decideOrderCancellation,
+  getOrderCancellationRequest,
+  confirmCourierBookingCancellation,
   submitOrderReturnRefund,
   getOrderReturnRefundRequest,
   listPharmacyReturnRefundRequests,
@@ -14,6 +16,7 @@ import {
 import type {
   CancellationRequestDto,
   CancellationDecisionDto,
+  CourierBookingCancellationDto,
   ReturnRefundRequestDto,
   ReturnRefundDecisionDto,
   ManualRefundCompletionDto,
@@ -51,6 +54,13 @@ export const requestCancellation = (orderId: string, user: User, input: Cancella
   requestOrderCancellation(repository, orderId, user, input)
 export const decideCancellation = (requestId: string, user: User, input: CancellationDecisionDto) =>
   decideOrderCancellation(repository, requestId, user, input)
+export const getCancellationRequest = (orderId: string, user: User) =>
+  getOrderCancellationRequest(repository, orderId, user)
+export const recordCourierBookingCancellation = (
+  orderId: string,
+  user: User,
+  input: CourierBookingCancellationDto,
+) => confirmCourierBookingCancellation(repository, orderId, user, input)
 export const listSupportCases = (orderId: string, user: User) =>
   listOrderSupportCases(repository, orderId, user)
 export const createSupportCase = (orderId: string, user: User, input: CreateSupportCaseDto) =>

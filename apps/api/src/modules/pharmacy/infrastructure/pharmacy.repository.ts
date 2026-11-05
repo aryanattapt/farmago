@@ -1,5 +1,6 @@
 import { asc, eq, inArray } from 'drizzle-orm'
 import { db, transaction } from '../../../infrastructure/database/client'
+import { ApplicationError } from '../../../shared/application-error'
 import { inventory, products } from '../../../infrastructure/database/schema'
 import { recordAudit } from '../../platform'
 import type { InventoryAdjustmentDto, ReplaceServiceHoursDto } from '../application/pharmacy.dto'
@@ -44,13 +45,15 @@ export class PostgresPharmacyRepository implements PharmacyRepository {
         'UPDATE inventory SET on_hand=$3,sales_blocked=false,updated_at=now() WHERE pharmacy_id=$1 AND product_id=$2',
         [input.pharmacyId, input.productId, next],
       )
-      await client.query(
-        'INSERT INTO inventory_movements(pharmacy_id,product_id,delta_on_hand,reason,actor_id) VALUES($1,$2,$3,$4,$5)',
+      const movement = await client.query(
+        'INSERT INTO inventory_movements(pharmacy_id,product_id,delta_on_hand,reason,actor_id) VALUES($1,$2,$3,$4,$5) RETURNING id',
         [input.pharmacyId, input.productId, input.delta, input.reason.slice(0, 500), actorId],
       )
       await recordAudit(client, actorId, 'inventory.adjusted', 'product', input.productId, {
         delta: input.delta,
         pharmacyId: input.pharmacyId,
+        onHand: next,
+        movementId: movement.rows[0].id,
       })
       return { ok: true, onHand: next, reserved }
     })
@@ -58,6 +61,9 @@ export class PostgresPharmacyRepository implements PharmacyRepository {
 
   replaceServiceHours(pharmacyId: string, actorId: string, input: ReplaceServiceHoursDto) {
     return transaction(async (client) => {
+      const pharmacy = await client.query('SELECT id FROM pharmacies WHERE id=$1 FOR UPDATE', [pharmacyId])
+      if (!pharmacy.rowCount)
+        throw new ApplicationError(404, 'NOT_FOUND', 'Apotek tidak ditemukan.')
       await client.query(
         "DELETE FROM pharmacy_service_hours WHERE pharmacy_id=$1 AND service_type='prescription'",
         [pharmacyId],
@@ -98,7 +104,10 @@ export class PostgresPharmacyRepository implements PharmacyRepository {
         'pharmacy.service_hours_changed',
         'pharmacy',
         pharmacyId,
-        {},
+        {
+          serviceDays: input.hours.filter((item) => item.active !== false).length,
+          exceptionCount: input.exceptions.length,
+        },
       )
     })
   }

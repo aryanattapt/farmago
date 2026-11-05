@@ -23,7 +23,7 @@ export async function handlePrescriptionRoutes({
     const form = await request.formData()
     const file = form.get('file')
     if (!(file instanceof File))
-      apiError(400, 'FILE_REQUIRED', 'Pilih foto atau PDF resep terlebih dahulu.')
+      return apiError(400, 'FILE_REQUIRED', 'Pilih foto atau PDF resep terlebih dahulu.')
     const data = Buffer.from(await file.arrayBuffer())
     const saved = await uploadPrescriptionFile(uploadMatch[1], currentUser, {
       data,

@@ -360,6 +360,9 @@ export const shipments = pgTable('shipments', {
   handoverReference: text('handover_reference'),
   handedOverAt: timestamp('handed_over_at', { withTimezone: true }),
   deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  bookingCancellationReference: text('booking_cancellation_reference'),
+  bookingCancelledAt: timestamp('booking_cancelled_at', { withTimezone: true }),
+  bookingCancelledBy: uuid('booking_cancelled_by'),
 })
 
 export const shipmentAttempts = pgTable('shipment_attempts', {

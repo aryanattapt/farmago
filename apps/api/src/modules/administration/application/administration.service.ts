@@ -56,6 +56,8 @@ export type AdministrationCancellationRow = {
   reason: string
   status: string
   order_status: string
+  fulfillment_method: string
+  shipment_status: string | null
   total: string | number
   customer_name: string
   pharmacy_name: string
@@ -192,6 +194,8 @@ export async function listAdminCancellationRequests(repository: AdministrationRe
     reason: row.reason,
     status: row.status,
     orderStatus: row.order_status,
+    fulfillmentMethod: row.fulfillment_method,
+    shipmentStatus: row.shipment_status,
     total: amount(row.total),
     customerName: row.customer_name,
     pharmacyName: row.pharmacy_name,
@@ -218,16 +222,42 @@ export function createAdminProduct(
   actorId: string,
   input: CreateProductRequestDto,
 ) {
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    throw new ApplicationError(400, 'INVALID_PRODUCT', 'Isi produk tidak valid.')
+  const allowed = [
+    'sku', 'name', 'category', 'sellUnit', 'description', 'requiresPrescription',
+    'batchTrackingRequired', 'specialHandling', 'shippingWeightGrams', 'shippingWidthCm',
+    'shippingHeightCm', 'shippingLengthCm',
+  ]
+  const fields = input as Record<string, unknown>
+  if (Object.keys(fields).some((key) => !allowed.includes(key)))
+    throw new ApplicationError(400, 'INVALID_PRODUCT', 'Produk memuat field yang tidak didukung.')
+  for (const field of ['sku', 'name', 'category', 'sellUnit'] as const)
+    if (fields[field] !== undefined && typeof fields[field] !== 'string')
+      throw new ApplicationError(400, 'INVALID_PRODUCT', `Field ${field} harus berupa teks.`)
+  for (const field of ['requiresPrescription', 'batchTrackingRequired', 'specialHandling'] as const)
+    if (fields[field] !== undefined && typeof fields[field] !== 'boolean')
+      throw new ApplicationError(400, 'INVALID_PRODUCT', `Field ${field} harus bernilai true atau false.`)
+  if (fields.description !== undefined && (typeof fields.description !== 'string' || fields.description.length > 3000))
+    throw new ApplicationError(400, 'INVALID_PRODUCT', 'Keterangan produk maksimal 3000 karakter.')
+  const parseRequiredInteger = (value: unknown, min: number, max: number) => {
+    const numeric = typeof value === 'number'
+      ? value
+      : typeof value === 'string' && /^\d+$/.test(value.trim())
+        ? Number(value.trim())
+        : Number.NaN
+    return Number.isSafeInteger(numeric) && numeric >= min && numeric <= max ? numeric : Number.NaN
+  }
   const sku = String(input.sku ?? '')
     .trim()
     .toUpperCase()
   const name = String(input.name ?? '').trim()
   const category = String(input.category ?? '').trim()
   const sellUnit = String(input.sellUnit ?? '').trim()
-  const shippingWeightGrams = Number(input.shippingWeightGrams)
-  const shippingWidthCm = Number(input.shippingWidthCm)
-  const shippingHeightCm = Number(input.shippingHeightCm)
-  const shippingLengthCm = Number(input.shippingLengthCm)
+  const shippingWeightGrams = parseRequiredInteger(input.shippingWeightGrams, 1, 30000)
+  const shippingWidthCm = parseRequiredInteger(input.shippingWidthCm, 1, 200)
+  const shippingHeightCm = parseRequiredInteger(input.shippingHeightCm, 1, 200)
+  const shippingLengthCm = parseRequiredInteger(input.shippingLengthCm, 1, 200)
   if (
     !/^[A-Z0-9_-]{2,40}$/.test(sku) ||
     name.length < 2 ||
@@ -254,10 +284,17 @@ export async function configureAdminInventory(
   actorId: string,
   input: ConfigureInventoryRequestDto,
 ) {
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    throw new ApplicationError(400, 'INVALID_INVENTORY', 'Isi perubahan stok tidak valid.')
   const pharmacyId = String(input.pharmacyId ?? '')
   const productId = String(input.productId ?? '')
-  const onHand = Number(input.onHand)
-  const unitPrice = Number(input.unitPrice)
+  const parseNumber = (value: unknown) => {
+    if (typeof value === 'number') return value
+    if (typeof value === 'string' && value.trim()) return Number(value.trim())
+    return Number.NaN
+  }
+  const onHand = parseNumber(input.onHand)
+  const unitPrice = parseNumber(input.unitPrice)
   const validUuid = (value: string) =>
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
   if (
@@ -265,8 +302,11 @@ export async function configureAdminInventory(
     !validUuid(productId) ||
     !Number.isInteger(onHand) ||
     onHand < 0 ||
+    onHand > 2_147_483_647 ||
     !Number.isFinite(unitPrice) ||
-    unitPrice < 0
+    unitPrice < 0 ||
+    unitPrice > 999_999_999_999.99 ||
+    Math.abs(Math.round(unitPrice * 100) - unitPrice * 100) > 0.000001
   )
     throw new ApplicationError(
       400,
@@ -295,6 +335,8 @@ export async function updateAdminProduct(
   productId: string,
   input: UpdateProductRequestDto,
 ) {
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    throw new ApplicationError(400, 'INVALID_PRODUCT', 'Isi perubahan produk tidak valid.')
   const allowed = [
     'name',
     'description',
@@ -309,29 +351,63 @@ export async function updateAdminProduct(
     'shippingLengthCm',
     'status',
   ]
-  if (Object.keys(input).some((key) => !allowed.includes(key)))
+  const values = input as Record<string, unknown>
+  if (Object.keys(values).some((key) => !allowed.includes(key)))
     throw new ApplicationError(
       400,
       'INVALID_PRODUCT',
       'Perubahan produk memuat field yang tidak didukung.',
     )
-  if (
-    input.shippingWeightGrams != null &&
-    (!Number.isSafeInteger(Number(input.shippingWeightGrams)) ||
-      Number(input.shippingWeightGrams) < 0 || Number(input.shippingWeightGrams) > 30000)
-  )
-    throw new ApplicationError(400, 'INVALID_PRODUCT', 'Berat kemasan harus berupa bilangan bulat 0 sampai 30000 gram.')
-  for (const [field, value] of [
-    ['shippingWidthCm', input.shippingWidthCm],
-    ['shippingHeightCm', input.shippingHeightCm],
-    ['shippingLengthCm', input.shippingLengthCm],
-  ] as const) {
-    if (value != null && (!Number.isSafeInteger(Number(value)) || Number(value) < 1 || Number(value) > 200))
-      throw new ApplicationError(400, 'INVALID_PRODUCT', 'Dimensi kemasan harus berupa bilangan bulat 1 sampai 200 cm.')
+  const normalized: UpdateProductRequestDto = {}
+  const validateText = (field: 'name' | 'description' | 'category' | 'sellUnit', min: number, max: number) => {
+    const value = values[field]
+    if (value === undefined || value === null) return
+    if (typeof value !== 'string')
+      throw new ApplicationError(400, 'INVALID_PRODUCT', `Field ${field} harus berupa teks.`)
+    const cleaned = field === 'description' ? value : value.trim()
+    if (cleaned.length < min || cleaned.length > max)
+      throw new ApplicationError(400, 'INVALID_PRODUCT', `Field ${field} harus berisi ${min}–${max} karakter.`)
+    normalized[field] = cleaned
   }
-  if (input.status !== undefined && !['active', 'inactive'].includes(input.status))
+  validateText('name', 2, 160)
+  validateText('description', 0, 3000)
+  validateText('category', 2, 80)
+  validateText('sellUnit', 2, 100)
+  for (const field of ['requiresPrescription', 'batchTrackingRequired', 'specialHandling'] as const) {
+    const value = values[field]
+    if (value === undefined || value === null) continue
+    if (typeof value !== 'boolean')
+      throw new ApplicationError(400, 'INVALID_PRODUCT', `Field ${field} harus bernilai true atau false.`)
+    normalized[field] = value
+  }
+  const parseInteger = (field: 'shippingWeightGrams' | 'shippingWidthCm' | 'shippingHeightCm' | 'shippingLengthCm', min: number, max: number) => {
+    const value = values[field]
+    if (value === undefined || value === null) return
+    const numeric = typeof value === 'number'
+      ? value
+      : typeof value === 'string' && /^\d+$/.test(value.trim())
+        ? Number(value.trim())
+        : Number.NaN
+    if (!Number.isSafeInteger(numeric) || numeric < min || numeric > max)
+      throw new ApplicationError(400, 'INVALID_PRODUCT', field === 'shippingWeightGrams'
+        ? 'Berat kemasan harus berupa bilangan bulat 0 sampai 30000 gram.'
+        : 'Dimensi kemasan harus berupa bilangan bulat 1 sampai 200 cm.')
+    normalized[field] = numeric
+  }
+  parseInteger('shippingWeightGrams', 0, 30000)
+  parseInteger('shippingWidthCm', 1, 200)
+  parseInteger('shippingHeightCm', 1, 200)
+  parseInteger('shippingLengthCm', 1, 200)
+  if (values.status !== undefined && values.status !== null) {
+    if (typeof values.status !== 'string' || !['active', 'inactive'].includes(values.status))
+      throw new ApplicationError(400, 'INVALID_STATUS', 'Status produk tidak valid.')
+    normalized.status = values.status
+  }
+  if (!Object.keys(normalized).length)
+    throw new ApplicationError(400, 'INVALID_PRODUCT', 'Isi minimal satu perubahan produk yang valid.')
+  if (Object.prototype.hasOwnProperty.call(values, 'status') && values.status === null)
     throw new ApplicationError(400, 'INVALID_STATUS', 'Status produk tidak valid.')
-  const result = await repository.updateProduct(actorId, productId, input)
+  const result = await repository.updateProduct(actorId, productId, normalized)
   if (!result.ok) throw new ApplicationError(404, 'NOT_FOUND', 'Produk tidak ditemukan.')
   return result.value
 }
@@ -341,11 +417,22 @@ export function createAdminPharmacy(
   actorId: string,
   input: CreatePharmacyRequestDto,
 ) {
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    throw new ApplicationError(400, 'INVALID_PHARMACY', 'Isi apotek tidak valid.')
+  const fields = input as Record<string, unknown>
+  const allowed = ['name', 'addressText', 'city', 'postalCodes', 'licenseReference', 'rajaongkirOriginId', 'deliveryContactName', 'deliveryPhone', 'deliveryEmail']
+  if (Object.keys(fields).some((key) => !allowed.includes(key)))
+    throw new ApplicationError(400, 'INVALID_PHARMACY', 'Apotek memuat field yang tidak didukung.')
+  for (const field of ['name', 'addressText', 'city', 'licenseReference', 'deliveryContactName', 'deliveryPhone', 'deliveryEmail'] as const)
+    if (fields[field] !== undefined && typeof fields[field] !== 'string')
+      throw new ApplicationError(400, 'INVALID_PHARMACY', `Field ${field} harus berupa teks.`)
+  if (input.licenseReference != null && input.licenseReference.length > 160)
+    throw new ApplicationError(400, 'INVALID_PHARMACY', 'Referensi izin maksimal 160 karakter.')
   const name = String(input.name ?? '').trim()
   const address = String(input.addressText ?? '').trim()
   const city = String(input.city ?? '').trim()
-  const postalCodes = Array.isArray(input.postalCodes)
-    ? [...new Set(input.postalCodes.map((value) => String(value).trim()))]
+  const postalCodes = Array.isArray(input.postalCodes) && input.postalCodes.every((value): value is string => typeof value === 'string')
+    ? [...new Set(input.postalCodes.map((value) => value.trim()))]
     : []
   const deliveryContactName = String(input.deliveryContactName ?? '').trim()
   const deliveryPhone = String(input.deliveryPhone ?? '').trim()
@@ -383,22 +470,37 @@ export async function updateAdminPharmacy(
   pharmacyId: string,
   input: UpdatePharmacyRequestDto,
 ) {
-  const status = input.status == null ? null : String(input.status)
-  const hasOrigin = input.rajaongkirOriginId !== undefined
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    throw new ApplicationError(400, 'INVALID_PHARMACY_UPDATE', 'Isi perubahan apotek tidak valid.')
+  const values = input as Record<string, unknown>
+  const allowed = ['status', 'rajaongkirOriginId', 'deliveryContactName', 'deliveryPhone', 'deliveryEmail']
+  if (Object.keys(values).some((key) => !allowed.includes(key)))
+    throw new ApplicationError(400, 'INVALID_PHARMACY_UPDATE', 'Perubahan apotek memuat field yang tidak didukung.')
+  const status = input.status === undefined ? null : input.status
+  const hasOrigin = Object.prototype.hasOwnProperty.call(values, 'rajaongkirOriginId')
   const hasDeliveryContact =
-    input.deliveryContactName !== undefined ||
-    input.deliveryPhone !== undefined ||
-    input.deliveryEmail !== undefined
+    Object.prototype.hasOwnProperty.call(values, 'deliveryContactName') ||
+    Object.prototype.hasOwnProperty.call(values, 'deliveryPhone') ||
+    Object.prototype.hasOwnProperty.call(values, 'deliveryEmail')
+  const normalizeOptionalText = (field: 'deliveryContactName' | 'deliveryPhone' | 'deliveryEmail') => {
+    const value = values[field]
+    if (value === undefined) return undefined
+    if (value === null) return null
+    if (typeof value !== 'string')
+      throw new ApplicationError(400, 'INVALID_DELIVERY_CONTACT', 'Kontak pengirim apotek harus berupa teks.')
+    const cleaned = value.trim()
+    return field === 'deliveryEmail' ? cleaned.toLowerCase() : cleaned
+  }
   const deliveryContact = hasDeliveryContact
     ? {
-        ...(input.deliveryContactName !== undefined
-          ? { deliveryContactName: input.deliveryContactName == null ? null : String(input.deliveryContactName).trim() }
+        ...(Object.prototype.hasOwnProperty.call(values, 'deliveryContactName')
+          ? { deliveryContactName: normalizeOptionalText('deliveryContactName')! }
           : {}),
-        ...(input.deliveryPhone !== undefined
-          ? { deliveryPhone: input.deliveryPhone == null ? null : String(input.deliveryPhone).trim() }
+        ...(Object.prototype.hasOwnProperty.call(values, 'deliveryPhone')
+          ? { deliveryPhone: normalizeOptionalText('deliveryPhone')! }
           : {}),
-        ...(input.deliveryEmail !== undefined
-          ? { deliveryEmail: input.deliveryEmail == null ? null : String(input.deliveryEmail).trim().toLowerCase() }
+        ...(Object.prototype.hasOwnProperty.call(values, 'deliveryEmail')
+          ? { deliveryEmail: normalizeOptionalText('deliveryEmail')! }
           : {}),
       }
     : undefined
@@ -412,17 +514,23 @@ export async function updateAdminPharmacy(
       throw new ApplicationError(400, 'INVALID_DELIVERY_CONTACT', 'Nama, telepon, dan email kontak pengirim apotek harus valid.')
   }
   let originId: number | null | undefined
-  if (status !== null && !['pending', 'active', 'suspended'].includes(status))
-    throw new ApplicationError(400, 'INVALID_STATUS', 'Status apotek tidak valid.')
+  if (Object.prototype.hasOwnProperty.call(values, 'status')) {
+    if (typeof status !== 'string' || !['pending', 'active', 'suspended'].includes(status))
+      throw new ApplicationError(400, 'INVALID_STATUS', 'Status apotek tidak valid.')
+  }
   if (hasOrigin) {
     originId =
       input.rajaongkirOriginId == null || input.rajaongkirOriginId === ''
         ? null
-        : Number(input.rajaongkirOriginId)
+        : typeof input.rajaongkirOriginId === 'number'
+          ? input.rajaongkirOriginId
+          : typeof input.rajaongkirOriginId === 'string' && /^\d+$/.test(input.rajaongkirOriginId.trim())
+            ? Number(input.rajaongkirOriginId.trim())
+            : Number.NaN
     if (originId != null && (!Number.isSafeInteger(originId) || originId <= 0))
       throw new ApplicationError(400, 'INVALID_SHIPPING_ORIGIN', 'ID lokasi asal RajaOngkir tidak valid.')
   }
-  if (status === null && !hasOrigin && !hasDeliveryContact)
+  if (!Object.keys(values).length)
     throw new ApplicationError(400, 'INVALID_PHARMACY_UPDATE', 'Perubahan apotek kosong.')
   const result = hasDeliveryContact
     ? await repository.updatePharmacy(actorId, pharmacyId, status, originId, deliveryContact)

@@ -8,6 +8,7 @@ import type {
   ReturnRefundDecisionDto,
   ReturnRefundRequestDto,
   CancellationRequestDto,
+  CourierBookingCancellationDto,
   CreateSupportCaseDto,
   UpdateSupportCaseDto,
 } from './support.dto'
@@ -63,7 +64,22 @@ export interface SupportRepository {
   ): Promise<
     SupportResult<
       unknown,
-      'not-found' | 'already-decided' | 'invalid-decision' | 'cancellation-not-allowed'
+      'not-found'
+      | 'already-decided'
+      | 'invalid-decision'
+      | 'cancellation-not-allowed'
+      | 'delivery-booking-active'
+    >
+  >
+  getCancellationRequest(orderId: string, actor: User): Promise<unknown>
+  recordCourierBookingCancellation(
+    orderId: string,
+    actorId: string,
+    providerCancellationReference: string,
+  ): Promise<
+    SupportResult<
+      unknown,
+      'not-found' | 'cancellation-request-not-open' | 'shipment-state-unresolved' | 'handover-already-recorded'
     >
   >
   findOrderForCases(orderId: string): Promise<{ customer_id: string; pharmacy_id: string } | null>
@@ -123,10 +139,54 @@ export async function decideOrderCancellation(
     throw new ApplicationError(409, 'ALREADY_DECIDED', 'Permintaan pembatalan sudah diputuskan.')
   if (result.reason === 'invalid-decision')
     throw new ApplicationError(400, 'INVALID_DECISION', 'Keputusan tidak valid.')
+  if (result.reason === 'delivery-booking-active')
+    throw new ApplicationError(
+      409,
+      'DELIVERY_BOOKING_ACTIVE',
+      'Booking kurir masih aktif atau belum dipastikan batal. Selesaikan pembatalan di Komerce dan catat referensinya sebelum menyetujui pembatalan pesanan.',
+    )
   throw new ApplicationError(
     409,
     'CANCELLATION_NOT_ALLOWED',
     'Pesanan sudah diserahkan atau berakhir.',
+  )
+}
+
+export function getOrderCancellationRequest(
+  repository: SupportRepository,
+  orderId: string,
+  user: User,
+) {
+  return repository.getCancellationRequest(orderId, user)
+}
+
+export async function confirmCourierBookingCancellation(
+  repository: SupportRepository,
+  orderId: string,
+  user: User,
+  input: CourierBookingCancellationDto,
+) {
+  if (!hasRole(user, 'admin', 'cs'))
+    throw new ApplicationError(403, 'FORBIDDEN', 'Akses tidak diizinkan untuk akun ini.')
+  const reference = String(input.providerCancellationReference ?? '').trim()
+  if (reference.length < 3 || reference.length > 200)
+    throw new ApplicationError(
+      400,
+      'INVALID_PROVIDER_CANCELLATION_REFERENCE',
+      'Referensi konfirmasi pembatalan kurir wajib diisi (3–200 karakter).',
+    )
+  const result = await repository.recordCourierBookingCancellation(orderId, user.id, reference)
+  if (result.ok) return result.value
+  if (result.reason === 'not-found')
+    throw new ApplicationError(404, 'NOT_FOUND', 'Pesanan tidak ditemukan.')
+  if (result.reason === 'cancellation-request-not-open')
+    throw new ApplicationError(409, 'CANCELLATION_REQUEST_NOT_OPEN', 'Tidak ada permintaan pembatalan yang menunggu keputusan.')
+  if (result.reason === 'handover-already-recorded')
+    throw new ApplicationError(409, 'HANDOVER_ALREADY_RECORDED', 'Pesanan sudah diserahkan; pembatalan biasa tidak dapat dilanjutkan.')
+  throw new ApplicationError(
+    409,
+    'SHIPMENT_STATE_UNRESOLVED',
+    'Status booking sedang diproses atau belum cocok untuk direkonsiliasi. Tunggu hasil provider, lalu periksa kembali di Komerce.',
   )
 }
 
